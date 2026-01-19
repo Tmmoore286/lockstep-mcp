@@ -393,33 +393,52 @@ const DASHBOARD_HTML = `<!doctype html>
       }
 
       async function fetchState() {
-        const response = await fetch("/api/state");
-        const data = await response.json();
-        updateState(data.state, data.config, data.projectContext, data.implementers);
+        try {
+          const response = await fetch("/api/state");
+          const data = await response.json();
+          console.log("Fetched state:", data);
+          updateState(data.state, data.config, data.projectContext, data.implementers);
+        } catch (err) {
+          console.error("Failed to fetch state:", err);
+          statusEl.textContent = "Error loading data - check console";
+        }
       }
 
       function connect() {
         const protocol = window.location.protocol === "https:" ? "wss" : "ws";
-        const socket = new WebSocket(protocol + "://" + window.location.host + "/ws");
+        const wsUrl = protocol + "://" + window.location.host + "/ws";
+        console.log("Connecting to WebSocket:", wsUrl);
+        const socket = new WebSocket(wsUrl);
 
         socket.addEventListener("open", () => {
+          console.log("WebSocket connected");
           statusEl.textContent = "Connected - live updates";
         });
 
         socket.addEventListener("message", (event) => {
           const payload = JSON.parse(event.data);
+          console.log("WebSocket message:", payload.type);
           if (payload.type === "snapshot" || payload.type === "state") {
             updateState(payload.state, payload.config, payload.projectContext, payload.implementers);
           }
         });
 
-        socket.addEventListener("close", () => {
+        socket.addEventListener("error", (event) => {
+          console.error("WebSocket error:", event);
+        });
+
+        socket.addEventListener("close", (event) => {
+          console.log("WebSocket closed:", event.code, event.reason);
           statusEl.textContent = "Disconnected - retrying...";
-          setTimeout(connect, 1000);
+          setTimeout(connect, 2000);
         });
       }
 
-      fetchState();
+      // Load initial data immediately
+      fetchState().then(() => {
+        console.log("Initial fetch complete");
+      });
+      // Then connect for live updates
       connect();
     </script>
   </body>

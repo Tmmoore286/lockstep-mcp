@@ -841,33 +841,37 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
               role: "planner",
               status: "needs_context",
               phase: "gather_info",
-              message: "No project context found. Gather information in this order:",
+              message: "No project context found. Follow these steps IN ORDER:",
               steps: [
-                "1. ASK: What project/task are we working on today?",
-                "2. EXPLORE: Scan for README.md, package.json, and other docs to understand the codebase",
-                "3. SUMMARIZE: Tell the user what you found and your understanding",
-                "4. ASK CLARIFYING QUESTIONS based on what's missing or unclear:",
-                "   - What is the desired end state/goal?",
-                "   - Any specific requirements or constraints?",
-                "   - What are the acceptance criteria?",
-                "   - What tests should pass when complete?",
-                "   - What type of implementer should I launch - Claude or Codex?",
-                "5. SAVE: Call project_context_set with gathered + user-provided info"
+                "1. If user already said what to work on, acknowledge it. Otherwise ASK.",
+                "2. EXPLORE: Scan README.md, package.json, etc. to understand the codebase",
+                "3. SUMMARIZE: Tell the user what you found",
+                "4. ⛔ MANDATORY - ASK these questions and WAIT for answers:",
+                "   - What is the desired END STATE? (What does 'done' look like?)",
+                "   - What are your ACCEPTANCE CRITERIA?",
+                "   - Any CONSTRAINTS I should know about?",
+                "   - Should I use CLAUDE or CODEX as implementer?",
+                "5. ONLY AFTER user answers: Call project_context_set"
               ],
-              instruction: `START by asking the user: "What project or task are we working on today?"
+              instruction: `CRITICAL: You MUST ask the user these questions and WAIT for their answers before proceeding.
 
-After they answer:
-1. Read README.md, package.json, CLAUDE.md, and other relevant docs
-2. Summarize what you found: "Based on the codebase, I can see this is a [X] project using [Y]..."
-3. Ask CLARIFYING questions for anything not covered:
-   - End state/goal (what does "done" look like?)
-   - Constraints or requirements
-   - Acceptance criteria
-   - Tests that should pass
-   - Preferred implementer type (Claude or Codex)
-4. Only call project_context_set AFTER user confirms
+Step 1: Explore the codebase (README, package.json, etc.)
 
-The user is waiting. Start by asking what we're working on.`
+Step 2: Summarize what you found to the user
+
+Step 3: ⛔ STOP AND ASK - These questions are MANDATORY (do not skip or infer):
+   "Before I create a plan, I need your input on a few things:
+
+   1. What is the END STATE you want? What does 'done' look like?
+   2. What are your ACCEPTANCE CRITERIA? How will we know it's complete?
+   3. Are there any CONSTRAINTS or things I should avoid?
+   4. Should I use CLAUDE or CODEX as the implementer?"
+
+Step 4: WAIT for the user to answer
+
+Step 5: Only AFTER getting answers, call project_context_set
+
+DO NOT skip the questions. DO NOT infer the answers. The user must explicitly tell you.`
             });
           }
 

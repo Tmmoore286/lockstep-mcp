@@ -62,6 +62,42 @@ To run in the background:
 nohup npm run dev -- --mode strict --roots /absolute/path/to/your/repo,/tmp > /tmp/lunara-mcp.log 2>&1 &
 ```
 
+## Two agents collaborating (plain language)
+This is how you run Claude and Codex together using the same coordinator state.
+
+1) Make sure both tools use the same coordinator config
+- Both clients must point to the same MCP entry and same SQLite database (`--storage sqlite` and the same `--db-path` or `--data-dir`).
+- After updating the MCP config, restart both clients so they pick up the server entry.
+
+2) Open two terminals in the same repo
+- Terminal A: Claude
+- Terminal B: Codex
+
+3) Start both clients
+```bash
+cd /absolute/path/to/your/repo
+claude
+```
+```bash
+cd /absolute/path/to/your/repo
+codex
+```
+
+4) Tell them how to collaborate
+Paste one of these into each client:
+
+Claude (planner):
+```
+Use the lunara-coordinator MCP. Create tasks for plan steps and update task status as you go. Use lock_acquire before editing any file and lock_release when done. I’m the planner; Codex is the implementer.
+```
+
+Codex (implementer):
+```
+Use the lunara-coordinator MCP. List tasks, claim one, lock files before edits, implement, then update the task status. I’m the implementer; Claude is the planner.
+```
+
+After that, they share state through the coordinator and keep each other in sync.
+
 ## Configuration
 All options can be provided by CLI flags or env vars.
 

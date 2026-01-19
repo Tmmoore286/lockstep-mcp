@@ -1061,16 +1061,25 @@ DO NOT proceed to implementation without explicit user approval.`
               total: implementers.length,
               active: activeImplementers.length
             },
-            instruction: tasks.length === 0 && inProgressTasks.length === 0
+instruction: tasks.length === 0 && inProgressTasks.length === 0
               ? "All tasks complete! Ask the user to verify the work. If satisfied, call project_status_set with status 'complete'. Otherwise create more tasks."
-              : `IMPORTANT: You are the PLANNER - do NOT write code or run builds yourself. Your job is to:
+              : activeImplementers.length === 0
+              ? `⚠️ NO ACTIVE IMPLEMENTERS! You MUST launch an implementer NOW.
+
+Call: launch_implementer({ type: "${implType}", name: "impl-1" })
+
+⛔ DO NOT write code, fix bugs, or run builds yourself. Your job is coordination only.
+The implementer will do the actual work once launched.`
+              : `⛔ REMINDER: You are the PLANNER - you are PROHIBITED from writing code or running builds.
+
+Your allowed actions:
 1. Monitor progress via task_list and note_list
-2. Communicate with implementers via note_append
-3. Launch more implementers if needed: launch_implementer with type="${implType}"
-4. Answer implementer questions via discussions
+2. Review tasks in "review" status - use task_approve or task_request_changes
+3. Answer implementer questions via discussion_reply
+4. Launch more implementers if needed: launch_implementer with type="${implType}"
 5. When all work is done, set project status to 'complete'
 
-If no implementers are active, launch one NOW with launch_implementer.`
+Active implementers: ${activeImplementers.length}. Let them do the implementation work.`
           });
         } else {
           // IMPLEMENTER ROLE

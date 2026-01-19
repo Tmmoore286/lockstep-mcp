@@ -3,13 +3,14 @@ import { getPlannerPrompt, getImplementerPrompt, getAutopilotPrompts } from './p
 
 describe('Prompts', () => {
   describe('getPlannerPrompt', () => {
-    it('should return planner prompt with critical rules', () => {
+    it('should return planner prompt with absolute prohibitions', () => {
       const prompt = getPlannerPrompt();
 
-      // Check for critical rules
-      expect(prompt).toContain('CRITICAL RULES');
-      expect(prompt).toContain('NEVER write code');
-      expect(prompt).toContain('NEVER run pnpm/npm build');
+      // Check for prohibitions
+      expect(prompt).toContain('ABSOLUTE PROHIBITIONS');
+      expect(prompt).toContain('NEVER use file write/edit/update tools');
+      expect(prompt).toContain('NEVER run build commands');
+      expect(prompt).toContain('NEVER fix code errors yourself');
     });
 
     it('should include task complexity guidance', () => {

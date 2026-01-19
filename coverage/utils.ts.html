@@ -23,30 +23,30 @@
         <div class='clearfix'>
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">4.76% </span>
+                <span class="strong">85.71% </span>
                 <span class="quiet">Statements</span>
-                <span class='fraction'>1/21</span>
+                <span class='fraction'>18/21</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">0% </span>
+                <span class="strong">90.9% </span>
                 <span class="quiet">Branches</span>
-                <span class='fraction'>0/11</span>
+                <span class='fraction'>10/11</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">11.11% </span>
+                <span class="strong">77.77% </span>
                 <span class="quiet">Functions</span>
-                <span class='fraction'>1/9</span>
+                <span class='fraction'>7/9</span>
             </div>
         
             
             <div class='fl pad1y space-right2'>
-                <span class="strong">6.25% </span>
+                <span class="strong">93.75% </span>
                 <span class="quiet">Lines</span>
-                <span class='fraction'>1/16</span>
+                <span class='fraction'>15/16</span>
             </div>
         
             
@@ -61,7 +61,7 @@
             </div>
         </template>
     </div>
-    <div class='status-line low'></div>
+    <div class='status-line high'></div>
     <pre><table class="coverage">
 <tr><td class="line-count quiet"><a name='L1'></a><a href='#L1'>1</a>
 <a name='L2'></a><a href='#L2'>2</a>
@@ -104,34 +104,34 @@
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">56x</span>
+<span class="cline-any cline-yes">25x</span>
+<span class="cline-any cline-yes">25x</span>
+<span class="cline-any cline-yes">25x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">14x</span>
+<span class="cline-any cline-yes">15x</span>
+<span class="cline-any cline-yes">15x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">10x</span>
+<span class="cline-any cline-yes">10x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">5x</span>
+<span class="cline-any cline-yes">3x</span>
+<span class="cline-any cline-yes">4x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-no">&nbsp;</span>
+<span class="cline-any cline-yes">1x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
-<span class="cline-any cline-yes">48x</span>
+<span class="cline-any cline-yes">50x</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
 <span class="cline-any cline-neutral">&nbsp;</span>
@@ -140,31 +140,31 @@
 <span class="cline-any cline-neutral">&nbsp;</span></td><td class="text"><pre class="prettyprint lang-js">import fs from "node:fs/promises";
 import path from "node:path";
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >expandHome(i</span>nput: string): string {
-<span class="cstat-no" title="statement not covered" >  if (!input.startsWith("~")) <span class="cstat-no" title="statement not covered" >return input;</span></span>
-  const home = <span class="cstat-no" title="statement not covered" >process.env.HOME;</span>
-<span class="cstat-no" title="statement not covered" >  if (!home) <span class="cstat-no" title="statement not covered" >return input;</span></span>
-<span class="cstat-no" title="statement not covered" >  return path.join(home, input.slice(1));</span>
+export function expandHome(input: string): string {
+  if (!input.startsWith("~")) return input;
+  const home = process.env.HOME;
+  <span class="missing-if-branch" title="if path not taken" >I</span>if (!home) <span class="cstat-no" title="statement not covered" >return input;</span>
+  return path.join(home, input.slice(1));
 }
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >normalizeRoots(r</span>oots: string[]): string[] {
-<span class="cstat-no" title="statement not covered" >  return roots</span>
-    .map(<span class="fstat-no" title="function not covered" >(r</span>oot) =&gt; <span class="cstat-no" title="statement not covered" >expandHome(root))</span>
-    .map(<span class="fstat-no" title="function not covered" >(r</span>oot) =&gt; <span class="cstat-no" title="statement not covered" >path.resolve(root))</span>;
+export function normalizeRoots(roots: string[]): string[] {
+  return roots
+    .map((root) =&gt; expandHome(root))
+    .map((root) =&gt; path.resolve(root));
 }
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >isPathUnderRoot(t</span>argetPath: string, root: string): boolean {
-  const rel = <span class="cstat-no" title="statement not covered" >path.relative(root, targetPath);</span>
-<span class="cstat-no" title="statement not covered" >  return rel === "" || (!rel.startsWith("..") &amp;&amp; !path.isAbsolute(rel));</span>
+export function isPathUnderRoot(targetPath: string, root: string): boolean {
+  const rel = path.relative(root, targetPath);
+  return rel === "" || (!rel.startsWith("..") &amp;&amp; !path.isAbsolute(rel));
 }
 &nbsp;
-export function <span class="fstat-no" title="function not covered" >resolvePath(i</span>nputPath: string, mode: "open" | "strict", roots: string[]): string {
-  const resolved = <span class="cstat-no" title="statement not covered" >path.resolve(expandHome(inputPath));</span>
-<span class="cstat-no" title="statement not covered" >  if (mode === "open") <span class="cstat-no" title="statement not covered" >return resolved;</span></span>
-<span class="cstat-no" title="statement not covered" >  for (const root of roots) {</span>
-<span class="cstat-no" title="statement not covered" >    if (isPathUnderRoot(resolved, root)) <span class="cstat-no" title="statement not covered" >return resolved;</span></span>
+export function resolvePath(inputPath: string, mode: "open" | "strict", roots: string[]): string {
+  const resolved = path.resolve(expandHome(inputPath));
+  if (mode === "open") return resolved;
+  for (const root of roots) {
+    if (isPathUnderRoot(resolved, root)) return resolved;
   }
-<span class="cstat-no" title="statement not covered" >  throw new Error(`Path not allowed in strict mode: ${resolved}`);</span>
+  throw new Error(`Path not allowed in strict mode: ${resolved}`);
 }
 &nbsp;
 export async function ensureDir(dirPath: string): Promise&lt;void&gt; {
@@ -181,7 +181,7 @@ export function <span class="fstat-no" title="function not covered" >sleep(m</sp
             <div class='footer quiet pad2 space-top1 center small'>
                 Code coverage generated by
                 <a href="https://istanbul.js.org/" target="_blank" rel="noopener noreferrer">istanbul</a>
-                at 2026-01-19T21:43:43.746Z
+                at 2026-01-19T21:46:20.602Z
             </div>
         <script src="prettify.js"></script>
         <script>

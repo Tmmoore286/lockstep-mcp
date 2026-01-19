@@ -42,12 +42,12 @@ function loadConfig(configPath: string): { mcpServers: Record<string, unknown> }
 
 function resolveServerEntry() {
   const repoRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
-  const distServer = path.join(repoRoot, "dist", "server.js");
-  const srcServer = path.join(repoRoot, "src", "server.ts");
-  if (fs.existsSync(distServer)) {
-    return { command: "node", args: [distServer] };
+  const distCli = path.join(repoRoot, "dist", "cli.js");
+  const srcCli = path.join(repoRoot, "src", "cli.ts");
+  if (fs.existsSync(distCli)) {
+    return { command: "node", args: [distCli, "server"] };
   }
-  return { command: "node", args: ["--loader", "tsx", srcServer] };
+  return { command: "node", args: ["--import", "tsx", srcCli, "server"] };
 }
 
 export function installMcpEntry(options: InstallOptions) {

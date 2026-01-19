@@ -160,7 +160,8 @@ Defaults:
     "lockstep-mcp": {
       "command": "node",
       "args": [
-        "/absolute/path/to/lockstep-mcp/dist/server.js",
+        "/absolute/path/to/lockstep-mcp/dist/cli.js",
+        "server",
         "--mode",
         "strict",
         "--storage",
@@ -182,7 +183,8 @@ Dev example (uses TS loader):
       "args": [
         "--import",
         "tsx",
-        "/absolute/path/to/lockstep-mcp/src/server.ts",
+        "/absolute/path/to/lockstep-mcp/src/cli.ts",
+        "server",
         "--mode",
         "strict",
         "--storage",

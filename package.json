@@ -20,6 +20,9 @@
     "install:mcp": "node --import tsx src/cli.ts install",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "prepare": "npm run build",
     "clean": "rm -rf dist"
   },
@@ -52,6 +55,8 @@
     "@types/better-sqlite3": "^7.6.13",
     "@types/node": "^25.0.9",
     "@types/ws": "^8.18.1",
-    "typescript": "^5.9.3"
+    "@vitest/coverage-v8": "^4.0.17",
+    "typescript": "^5.9.3",
+    "vitest": "^4.0.17"
   }
 }

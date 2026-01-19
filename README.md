@@ -180,7 +180,7 @@ Dev example (uses TS loader):
     "lockstep-mcp-dev": {
       "command": "node",
       "args": [
-        "--loader",
+        "--import",
         "tsx",
         "/absolute/path/to/lockstep-mcp/src/server.ts",
         "--mode",
@@ -230,6 +230,7 @@ If you want, I can add:
 - File operations are restricted to `roots` when `mode=strict`.
 - Command allowlist is enforced when `command-mode=allowlist`.
 - Event log is written to `logs/events.jsonl`.
+- Node v20.6+ requires `--import tsx` instead of `--loader tsx` for dev usage.
 
 ## License
 MIT. See `LICENSE`.

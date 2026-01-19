@@ -13,9 +13,9 @@
     "LICENSE"
   ],
   "scripts": {
-    "dev": "node --loader tsx src/cli.ts server",
+    "dev": "node --import tsx src/cli.ts server",
     "start": "node dist/cli.js server",
-    "install:mcp": "node --loader tsx src/cli.ts install",
+    "install:mcp": "node --import tsx src/cli.ts install",
     "build": "tsc -p tsconfig.json",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "prepare": "npm run build",

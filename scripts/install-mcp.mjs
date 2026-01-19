@@ -7,7 +7,7 @@ const cliPath = path.join(repoRoot, "src", "cli.ts");
 
 const result = spawnSync(
   "node",
-  ["--loader", "tsx", cliPath, "install", ...process.argv.slice(2)],
+  ["--import", "tsx", cliPath, "install", ...process.argv.slice(2)],
   { stdio: "inherit" }
 );
 

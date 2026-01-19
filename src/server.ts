@@ -1100,17 +1100,24 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
         const existingImplementers = await store.listImplementers(projectRoot);
         const isFirstImplementer = existingImplementers.filter(i => i.status === "active").length === 0;
 
-        // Determine the command to run (codex uses --full-auto for autonomous work)
-        const cmd = type === "claude" ? "claude" : "codex --full-auto";
-
         // Build the prompt that will be injected
-        const prompt = `You are the implementer named "${name}". Initialize with: coordination_init({ role: "implementer" }). Then continuously work on tasks until the project status is "stopped" or "complete".`;
+        const prompt = `You are implementer ${name}. Run: coordination_init({ role: implementer })`;
+
+        // Determine the command to run
+        // Claude uses --print, Codex uses the prompt as an argument
+        let terminalCmd: string;
+        if (type === "claude") {
+          terminalCmd = `claude --print "${prompt}"`;
+        } else {
+          // Codex: --full-auto for autonomous work, pass prompt as quoted argument
+          terminalCmd = `codex --full-auto "${prompt}"`;
+        }
 
         // Launch in a new terminal window (macOS)
         const osascript = `
           tell application "Terminal"
             activate
-            do script "cd '${projectRoot}' && ${cmd} --print '${prompt.replace(/'/g, "\\'")}'"
+            do script "cd '${projectRoot}' && ${terminalCmd}"
           end tell
         `;
 
@@ -1124,6 +1131,8 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
                 activate
                 do script "cd '${projectRoot}' && node '${cliPath}' dashboard"
               end tell
+              delay 2
+              do shell script "open http://127.0.0.1:8787"
             `;
             const dashChild = spawn("osascript", ["-e", dashboardScript], {
               detached: true,
@@ -1167,7 +1176,7 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
           const message = error instanceof Error ? error.message : "Unknown error";
           return jsonResponse({
             success: false,
-            error: `Failed to launch implementer: ${message}. You may need to launch manually: cd '${projectRoot}' && ${cmd}`
+            error: `Failed to launch implementer: ${message}. You may need to launch manually: cd '${projectRoot}' && ${terminalCmd}`
           });
         }
       }

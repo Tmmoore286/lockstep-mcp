@@ -12,6 +12,7 @@ export type TmuxOptions = {
   split?: "horizontal" | "vertical";
   dashboard?: boolean;
   dashboardCmd?: string;
+  statusBar?: boolean;
 };
 
 function runTmux(args: string[], inherit = false) {
@@ -52,9 +53,18 @@ export async function launchTmux(options: TmuxOptions = {}) {
   const split = options.split ?? "vertical";
   const showDashboard = options.dashboard !== false;
   const dashboardCmd = options.dashboardCmd ?? "lockstep-mcp dashboard --host 127.0.0.1 --port 8787";
+  const statusBar = options.statusBar !== false;
 
   if (!sessionExists(session)) {
     runTmux(["new-session", "-d", "-s", session, "-c", repo, "-n", "claude"]);
+    if (statusBar) {
+      runTmux(["set-option", "-t", session, "-g", "status", "on"]);
+      runTmux(["set-option", "-t", session, "-g", "status-style", "bg=colour237,fg=colour252"]);
+      runTmux(["set-option", "-t", session, "-g", "status-left", " lockstep "]);
+      runTmux(["set-option", "-t", session, "-g", "status-right", "Ctrl-b n/p | Ctrl-b w"]);
+      runTmux(["set-option", "-t", session, "-g", "window-status-format", " #I:#W "]);
+      runTmux(["set-option", "-t", session, "-g", "window-status-current-format", " #[bold]#I:#W "]);
+    }
     sendKeys(`${session}:0.0`, claudeCmd);
 
     if (layout === "panes") {
@@ -85,6 +95,10 @@ export async function launchTmux(options: TmuxOptions = {}) {
       const targetIndex = layout === "panes" ? "1.0" : "2.0";
       runTmux(["new-window", "-t", session, "-n", "dashboard", "-c", repo]);
       sendKeys(`${session}:${targetIndex}`, dashboardCmd);
+    }
+
+    if (statusBar) {
+      runTmux(["display-message", "-t", session, "Lockstep: Ctrl-b n/p switch windows, Ctrl-b w list"]);
     }
   }
 

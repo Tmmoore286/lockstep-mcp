@@ -73,6 +73,12 @@ lockstep-mcp tmux --repo /absolute/path/to/your/repo
 
 By default it also starts the dashboard in a third tmux window. Switch windows with `Ctrl-b n`.
 
+What a tmux window is:
+- tmux runs inside a single terminal tab.
+- A tmux “window” is a full-screen terminal inside that tab.
+- You can switch between tmux windows with `Ctrl-b n` / `Ctrl-b p`.
+- The tmux status bar at the bottom lists the windows (claude, codex, dashboard).
+
 Options:
 - `--session <name>` set tmux session name (default: `lockstep`)
 - `--claude-cmd <cmd>` override Claude command (default: `claude`)
@@ -83,6 +89,15 @@ Options:
 - `--no-dashboard` skip launching the dashboard window
 - `--dashboard-host <host>` dashboard host (default: `127.0.0.1`)
 - `--dashboard-port <port>` dashboard port (default: `8787`)
+
+## macOS Terminal windows (no tmux)
+If you prefer separate macOS Terminal windows, use:
+
+```bash
+lockstep-mcp macos --repo /absolute/path/to/your/repo
+```
+
+This opens three Terminal windows (Claude, Codex, Dashboard).
 
 ## Agent self-install (Codex/Claude)
 If the agent has full access, it can install and register the MCP entry itself:

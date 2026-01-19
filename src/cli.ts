@@ -30,6 +30,7 @@ Usage:
   lockstep-mcp server [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>] [--data-dir <path>] [--log-dir <path>]
   lockstep-mcp dashboard [--host <host>] [--port <port>] [--poll-ms <ms>]
   lockstep-mcp tmux [--repo <path>] [--session <name>] [--claude-cmd <cmd>] [--codex-cmd <cmd>] [--layout windows|panes] [--split horizontal|vertical] [--no-prompts] [--no-dashboard] [--dashboard-host <host>] [--dashboard-port <port>]
+  lockstep-mcp macos [--repo <path>] [--claude-cmd <cmd>] [--codex-cmd <cmd>] [--dashboard-host <host>] [--dashboard-port <port>]
   lockstep-mcp prompts [--role planner|implementer]
   lockstep-mcp install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>]
 
@@ -37,6 +38,7 @@ Examples:
   lockstep-mcp server --mode strict --roots /path/to/repo,/tmp --storage sqlite
   lockstep-mcp dashboard --host 127.0.0.1 --port 8787
   lockstep-mcp tmux --repo /path/to/repo
+  lockstep-mcp macos --repo /path/to/repo
   lockstep-mcp install --config ~/.codex/.mcp.json --mode strict --roots /path/to/repo,/tmp --storage sqlite
   lockstep-mcp prompts
 `;
@@ -124,6 +126,17 @@ async function main() {
       dashboard: showDashboard,
       dashboardCmd,
     });
+    return;
+  }
+
+  if (command === "macos") {
+    const { launchMacos } = await import("./macos.js");
+    const repo = typeof args["--repo"] === "string" ? args["--repo"] : undefined;
+    const claudeCmd = typeof args["--claude-cmd"] === "string" ? args["--claude-cmd"] : undefined;
+    const codexCmd = typeof args["--codex-cmd"] === "string" ? args["--codex-cmd"] : undefined;
+    const dashboardHost = typeof args["--dashboard-host"] === "string" ? args["--dashboard-host"] : "127.0.0.1";
+    const dashboardPort = typeof args["--dashboard-port"] === "string" ? Number(args["--dashboard-port"]) : 8787;
+    await launchMacos({ repo, claudeCmd, codexCmd, dashboardHost, dashboardPort });
     return;
   }
 

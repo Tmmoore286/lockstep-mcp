@@ -1,5 +1,7 @@
 import { installMcpEntry } from "./install.js";
 import { getAutopilotPrompts, getPlannerPrompt, getImplementerPrompt } from "./prompts.js";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 function parseArgs(argv: string[]) {
   const args: Record<string, string | boolean> = {};
@@ -27,7 +29,7 @@ function printHelp() {
 Usage:
   lockstep-mcp server [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>] [--data-dir <path>] [--log-dir <path>]
   lockstep-mcp dashboard [--host <host>] [--port <port>] [--poll-ms <ms>]
-  lockstep-mcp tmux [--repo <path>] [--session <name>] [--claude-cmd <cmd>] [--codex-cmd <cmd>] [--no-prompts]
+  lockstep-mcp tmux [--repo <path>] [--session <name>] [--claude-cmd <cmd>] [--codex-cmd <cmd>] [--no-prompts] [--no-dashboard] [--dashboard-host <host>] [--dashboard-port <port>]
   lockstep-mcp prompts [--role planner|implementer]
   lockstep-mcp install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>]
 
@@ -99,7 +101,25 @@ async function main() {
     const claudeCmd = typeof args["--claude-cmd"] === "string" ? args["--claude-cmd"] : undefined;
     const codexCmd = typeof args["--codex-cmd"] === "string" ? args["--codex-cmd"] : undefined;
     const injectPrompts = args["--no-prompts"] ? false : true;
-    await launchTmux({ repo, session, claudeCmd, codexCmd, injectPrompts });
+    const showDashboard = args["--no-dashboard"] ? false : true;
+    const dashboardHost = typeof args["--dashboard-host"] === "string" ? args["--dashboard-host"] : "127.0.0.1";
+    const dashboardPort = typeof args["--dashboard-port"] === "string" ? Number(args["--dashboard-port"]) : 8787;
+    const cliPath = path.resolve(fileURLToPath(import.meta.url));
+    const nodePath = process.execPath;
+    const dashboardArgs = ["dashboard", "--host", dashboardHost, "--port", String(dashboardPort)];
+    const dashboardCmd = cliPath.endsWith(".ts")
+      ? `${nodePath} --import tsx ${cliPath} ${dashboardArgs.join(" ")}`
+      : `${nodePath} ${cliPath} ${dashboardArgs.join(" ")}`;
+
+    await launchTmux({
+      repo,
+      session,
+      claudeCmd,
+      codexCmd,
+      injectPrompts,
+      dashboard: showDashboard,
+      dashboardCmd,
+    });
     return;
   }
 

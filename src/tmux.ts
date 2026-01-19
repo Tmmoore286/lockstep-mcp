@@ -9,6 +9,8 @@ export type TmuxOptions = {
   codexCmd?: string;
   injectPrompts?: boolean;
   split?: "horizontal" | "vertical";
+  dashboard?: boolean;
+  dashboardCmd?: string;
 };
 
 function runTmux(args: string[], inherit = false) {
@@ -46,6 +48,8 @@ export async function launchTmux(options: TmuxOptions = {}) {
   const codexCmd = options.codexCmd ?? "codex";
   const injectPrompts = options.injectPrompts !== false;
   const split = options.split ?? "vertical";
+  const showDashboard = options.dashboard !== false;
+  const dashboardCmd = options.dashboardCmd ?? "lockstep-mcp dashboard --host 127.0.0.1 --port 8787";
 
   if (!sessionExists(session)) {
     runTmux(["new-session", "-d", "-s", session, "-c", repo]);
@@ -64,6 +68,11 @@ export async function launchTmux(options: TmuxOptions = {}) {
       sendKeys(`${session}:0.0`, getPlannerPrompt());
       await new Promise((resolve) => setTimeout(resolve, 500));
       sendKeys(`${session}:0.1`, getImplementerPrompt());
+    }
+
+    if (showDashboard) {
+      runTmux(["new-window", "-t", session, "-n", "dashboard", "-c", repo]);
+      sendKeys(`${session}:1.0`, dashboardCmd);
     }
   }
 

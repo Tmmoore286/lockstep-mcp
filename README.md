@@ -71,11 +71,16 @@ This launches Claude + Codex in a tmux split and auto-injects the autonomy promp
 lockstep-mcp tmux --repo /absolute/path/to/your/repo
 ```
 
+By default it also starts the dashboard in a second tmux window. Switch windows with `Ctrl-b n`.
+
 Options:
 - `--session <name>` set tmux session name (default: `lockstep`)
 - `--claude-cmd <cmd>` override Claude command (default: `claude`)
 - `--codex-cmd <cmd>` override Codex command (default: `codex`)
 - `--no-prompts` start panes without auto-injected prompts
+- `--no-dashboard` skip launching the dashboard window
+- `--dashboard-host <host>` dashboard host (default: `127.0.0.1`)
+- `--dashboard-port <port>` dashboard port (default: `8787`)
 
 ## Agent self-install (Codex/Claude)
 If the agent has full access, it can install and register the MCP entry itself:

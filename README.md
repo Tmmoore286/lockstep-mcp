@@ -65,18 +65,20 @@ npm run install:mcp -- --config /path/to/.mcp.json --mode strict --roots /absolu
 Restart your MCP client so it picks up the new server entry.
 
 ## One-command tmux launcher
-This launches Claude + Codex in a tmux split and auto-injects the autonomy prompts:
+This launches Claude + Codex in separate tmux windows and auto-injects the autonomy prompts:
 
 ```bash
 lockstep-mcp tmux --repo /absolute/path/to/your/repo
 ```
 
-By default it also starts the dashboard in a second tmux window. Switch windows with `Ctrl-b n`.
+By default it also starts the dashboard in a third tmux window. Switch windows with `Ctrl-b n`.
 
 Options:
 - `--session <name>` set tmux session name (default: `lockstep`)
 - `--claude-cmd <cmd>` override Claude command (default: `claude`)
 - `--codex-cmd <cmd>` override Codex command (default: `codex`)
+- `--layout windows|panes` choose separate windows or split panes (default: `windows`)
+- `--split horizontal|vertical` pane split direction when using `--layout panes`
 - `--no-prompts` start panes without auto-injected prompts
 - `--no-dashboard` skip launching the dashboard window
 - `--dashboard-host <host>` dashboard host (default: `127.0.0.1`)

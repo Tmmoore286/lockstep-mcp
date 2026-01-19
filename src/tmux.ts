@@ -8,6 +8,7 @@ export type TmuxOptions = {
   claudeCmd?: string;
   codexCmd?: string;
   injectPrompts?: boolean;
+  layout?: "windows" | "panes";
   split?: "horizontal" | "vertical";
   dashboard?: boolean;
   dashboardCmd?: string;
@@ -47,32 +48,43 @@ export async function launchTmux(options: TmuxOptions = {}) {
   const claudeCmd = options.claudeCmd ?? "claude";
   const codexCmd = options.codexCmd ?? "codex";
   const injectPrompts = options.injectPrompts !== false;
+  const layout = options.layout ?? "windows";
   const split = options.split ?? "vertical";
   const showDashboard = options.dashboard !== false;
   const dashboardCmd = options.dashboardCmd ?? "lockstep-mcp dashboard --host 127.0.0.1 --port 8787";
 
   if (!sessionExists(session)) {
-    runTmux(["new-session", "-d", "-s", session, "-c", repo]);
-    if (split === "vertical") {
-      runTmux(["split-window", "-h", "-t", `${session}:0`, "-c", repo]);
-    } else {
-      runTmux(["split-window", "-v", "-t", `${session}:0`, "-c", repo]);
-    }
-    runTmux(["select-layout", "-t", `${session}:0`, "even-horizontal"]);
-
+    runTmux(["new-session", "-d", "-s", session, "-c", repo, "-n", "claude"]);
     sendKeys(`${session}:0.0`, claudeCmd);
-    sendKeys(`${session}:0.1`, codexCmd);
+
+    if (layout === "panes") {
+      if (split === "vertical") {
+        runTmux(["split-window", "-h", "-t", `${session}:0`, "-c", repo]);
+      } else {
+        runTmux(["split-window", "-v", "-t", `${session}:0`, "-c", repo]);
+      }
+      runTmux(["select-layout", "-t", `${session}:0`, "even-horizontal"]);
+      sendKeys(`${session}:0.1`, codexCmd);
+    } else {
+      runTmux(["new-window", "-t", session, "-n", "codex", "-c", repo]);
+      sendKeys(`${session}:1.0`, codexCmd);
+    }
 
     if (injectPrompts) {
       await new Promise((resolve) => setTimeout(resolve, 1500));
       sendKeys(`${session}:0.0`, getPlannerPrompt());
       await new Promise((resolve) => setTimeout(resolve, 500));
-      sendKeys(`${session}:0.1`, getImplementerPrompt());
+      if (layout === "panes") {
+        sendKeys(`${session}:0.1`, getImplementerPrompt());
+      } else {
+        sendKeys(`${session}:1.0`, getImplementerPrompt());
+      }
     }
 
     if (showDashboard) {
+      const targetIndex = layout === "panes" ? "1.0" : "2.0";
       runTmux(["new-window", "-t", session, "-n", "dashboard", "-c", repo]);
-      sendKeys(`${session}:1.0`, dashboardCmd);
+      sendKeys(`${session}:${targetIndex}`, dashboardCmd);
     }
   }
 

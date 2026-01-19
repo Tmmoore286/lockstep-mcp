@@ -29,7 +29,7 @@ function printHelp() {
 Usage:
   lockstep-mcp server [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>] [--data-dir <path>] [--log-dir <path>]
   lockstep-mcp dashboard [--host <host>] [--port <port>] [--poll-ms <ms>]
-  lockstep-mcp tmux [--repo <path>] [--session <name>] [--claude-cmd <cmd>] [--codex-cmd <cmd>] [--no-prompts] [--no-dashboard] [--dashboard-host <host>] [--dashboard-port <port>]
+  lockstep-mcp tmux [--repo <path>] [--session <name>] [--claude-cmd <cmd>] [--codex-cmd <cmd>] [--layout windows|panes] [--split horizontal|vertical] [--no-prompts] [--no-dashboard] [--dashboard-host <host>] [--dashboard-port <port>]
   lockstep-mcp prompts [--role planner|implementer]
   lockstep-mcp install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>]
 
@@ -101,6 +101,8 @@ async function main() {
     const claudeCmd = typeof args["--claude-cmd"] === "string" ? args["--claude-cmd"] : undefined;
     const codexCmd = typeof args["--codex-cmd"] === "string" ? args["--codex-cmd"] : undefined;
     const injectPrompts = args["--no-prompts"] ? false : true;
+    const layout = typeof args["--layout"] === "string" ? args["--layout"] : undefined;
+    const split = typeof args["--split"] === "string" ? args["--split"] : undefined;
     const showDashboard = args["--no-dashboard"] ? false : true;
     const dashboardHost = typeof args["--dashboard-host"] === "string" ? args["--dashboard-host"] : "127.0.0.1";
     const dashboardPort = typeof args["--dashboard-port"] === "string" ? Number(args["--dashboard-port"]) : 8787;
@@ -117,6 +119,8 @@ async function main() {
       claudeCmd,
       codexCmd,
       injectPrompts,
+      layout: layout === "panes" ? "panes" : "windows",
+      split: split === "horizontal" ? "horizontal" : "vertical",
       dashboard: showDashboard,
       dashboardCmd,
     });

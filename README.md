@@ -10,6 +10,7 @@ If you are evaluating this repo: it is designed to be clear, practical, and prod
 - Install
 - Quick start
 - Collaboration walkthrough
+- Autonomy loop prompts
 - Configuration
 - Example `.mcp.json`
 - Storage + dashboard options
@@ -55,6 +56,14 @@ Global install (optional):
 npm install -g https://github.com/Tmmoore286/lockstep-mcp.git
 ```
 
+## Quick start
+```bash
+cd /absolute/path/to/lockstep-mcp
+npm install
+npm run install:mcp -- --config /path/to/.mcp.json --mode strict --roots /absolute/path/to/your/repo,/tmp --storage sqlite
+```
+Restart your MCP client so it picks up the new server entry.
+
 ## Agent self-install (Codex/Claude)
 If the agent has full access, it can install and register the MCP entry itself:
 
@@ -74,6 +83,11 @@ Notes:
 Local dev:
 ```bash
 npm run dev
+```
+
+Dashboard (live WebSocket view):
+```bash
+lockstep-mcp dashboard --host 127.0.0.1 --port 8787
 ```
 
 Global install:
@@ -131,6 +145,29 @@ Use the lockstep-mcp MCP. List tasks, claim one, lock files before edits, implem
 ```
 
 After that, they share state through the coordinator and keep each other in sync.
+
+## Autonomy loop prompts
+Generate recommended prompts:
+```bash
+lockstep-mcp prompts
+```
+
+Or use these directly:
+
+Planner (Claude):
+```
+You are the planner. Run a loop: every 30s call lockstep_mcp.task_list and lockstep_mcp.note_list.
+If there are no open tasks, create the next tasks from the plan. If notes request clarification,
+respond with a new note. Use lockstep_mcp.lock_acquire before editing any file and lock_release
+after. Stop only if you see a note containing "[halt]".
+```
+
+Implementer (Codex):
+```
+You are the implementer. Run a loop: every 30s call lockstep_mcp.task_list and lockstep_mcp.note_list.
+If there is a task not done and unowned, claim it, lock files, implement, update status, and leave a
+note with results. Stop only if you see a note containing "[halt]".
+```
 
 ## Configuration
 All options can be provided by CLI flags or env vars.
@@ -210,12 +247,16 @@ When to move to SQLite:
 - 4+ agents, high update frequency, or you want stronger durability and better concurrency.
 
 WebSocket/SSE gateway:
-- A separate lightweight web server can read `state.json` + `events.jsonl` and push updates to a dashboard.
-- WebSockets give bi‑directional real-time updates. SSE is simpler for one-way live status.
+- Built-in dashboard uses WebSocket for real-time updates.
+- SSE is an alternative if you want one-way streaming with less complexity.
 
-If you want, I can add:
-- SQLite storage implementation with a migration path.
-- A minimal live dashboard (HTML + WebSocket) showing tasks/locks/notes in real time.
+## Dashboard
+The dashboard runs locally and updates in real time via WebSocket. It shows tasks, locks, notes, and
+storage config. Start it with:
+
+```bash
+lockstep-mcp dashboard --host 127.0.0.1 --port 8787
+```
 
 ## Tools
 - `status_get`

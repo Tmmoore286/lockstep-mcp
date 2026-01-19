@@ -1,4 +1,5 @@
 import { installMcpEntry } from "./install.js";
+import { getAutopilotPrompts } from "./prompts.js";
 
 function parseArgs(argv: string[]) {
   const args: Record<string, string | boolean> = {};
@@ -25,11 +26,15 @@ function printHelp() {
 
 Usage:
   lockstep-mcp server [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>] [--data-dir <path>] [--log-dir <path>]
+  lockstep-mcp dashboard [--host <host>] [--port <port>] [--poll-ms <ms>]
+  lockstep-mcp prompts
   lockstep-mcp install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>]
 
 Examples:
   lockstep-mcp server --mode strict --roots /path/to/repo,/tmp --storage sqlite
+  lockstep-mcp dashboard --host 127.0.0.1 --port 8787
   lockstep-mcp install --config ~/.codex/.mcp.json --mode strict --roots /path/to/repo,/tmp --storage sqlite
+  lockstep-mcp prompts
 `;
   process.stdout.write(text);
 }
@@ -59,6 +64,20 @@ async function main() {
 
     process.stdout.write(`Wrote MCP server entry "${result.name}" to ${result.configPath}\n`);
     process.stdout.write(`Server args: ${result.serverPath}\n`);
+    return;
+  }
+
+  if (command === "prompts") {
+    process.stdout.write(getAutopilotPrompts());
+    return;
+  }
+
+  if (command === "dashboard") {
+    const { startDashboard } = await import("./dashboard.js");
+    const port = typeof args["--port"] === "string" ? Number(args["--port"]) : undefined;
+    const host = typeof args["--host"] === "string" ? args["--host"] : undefined;
+    const pollMs = typeof args["--poll-ms"] === "string" ? Number(args["--poll-ms"]) : undefined;
+    await startDashboard({ port, host, pollMs });
     return;
   }
 

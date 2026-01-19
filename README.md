@@ -1,4 +1,4 @@
-# Lunara MCP Coordinator
+# Lockstep MCP
 
 Local MCP server for coordinating multiple agents (tasks, locks, notes, file ops, command exec).
 
@@ -12,7 +12,7 @@ Local MCP server for coordinating multiple agents (tasks, locks, notes, file ops
 From GitHub:
 ```bash
 git clone <repo-url>
-cd lunara-mcp-coordinator
+cd lockstep-mcp
 npm install
 ```
 
@@ -34,7 +34,7 @@ npm run install:mcp -- \
 
 Notes:
 - Use the config file your CLI reads (repo-local `.mcp.json` or a global config).
-- If you installed globally, use the CLI directly: `lunara-mcp-coordinator install ...`
+- If you installed globally, use the CLI directly: `lockstep-mcp install ...`
 
 ## Run
 Local dev:
@@ -44,12 +44,12 @@ npm run dev
 
 Global install:
 ```bash
-lunara-mcp-coordinator server --mode strict --roots /absolute/path/to/your/repo,/tmp
+lockstep-mcp server --mode strict --roots /absolute/path/to/your/repo,/tmp
 ```
 
 CLI help:
 ```bash
-lunara-mcp-coordinator help
+lockstep-mcp help
 ```
 
 You can pass config flags after `--` when using npm scripts:
@@ -59,7 +59,7 @@ npm run dev -- --mode strict --roots /absolute/path/to/your/repo,/tmp
 
 To run in the background:
 ```bash
-nohup npm run dev -- --mode strict --roots /absolute/path/to/your/repo,/tmp > /tmp/lunara-mcp.log 2>&1 &
+nohup npm run dev -- --mode strict --roots /absolute/path/to/your/repo,/tmp > /tmp/lockstep-mcp.log 2>&1 &
 ```
 
 ## Two agents collaborating (plain language)
@@ -88,12 +88,12 @@ Paste one of these into each client:
 
 Claude (planner):
 ```
-Use the lunara-coordinator MCP. Create tasks for plan steps and update task status as you go. Use lock_acquire before editing any file and lock_release when done. I’m the planner; Codex is the implementer.
+Use the lockstep-mcp MCP. Create tasks for plan steps and update task status as you go. Use lock_acquire before editing any file and lock_release when done. I’m the planner; Codex is the implementer.
 ```
 
 Codex (implementer):
 ```
-Use the lunara-coordinator MCP. List tasks, claim one, lock files before edits, implement, then update the task status. I’m the implementer; Claude is the planner.
+Use the lockstep-mcp MCP. List tasks, claim one, lock files before edits, implement, then update the task status. I’m the implementer; Claude is the planner.
 ```
 
 After that, they share state through the coordinator and keep each other in sync.
@@ -113,8 +113,8 @@ All options can be provided by CLI flags or env vars.
 Defaults:
 - mode: `open`
 - roots: `process.cwd()`
-- data dir: `~/.lunara-mcp-coordinator/data`
-- log dir: `~/.lunara-mcp-coordinator/logs`
+- data dir: `~/.lockstep-mcp/data`
+- log dir: `~/.lockstep-mcp/logs`
 - storage: `sqlite`
 - db path: `<data-dir>/coordinator.db`
 - command mode: `open`
@@ -123,10 +123,10 @@ Defaults:
 ```json
 {
   "mcpServers": {
-    "lunara-coordinator": {
+    "lockstep-mcp": {
       "command": "node",
       "args": [
-        "/absolute/path/to/lunara-mcp-coordinator/dist/server.js",
+        "/absolute/path/to/lockstep-mcp/dist/server.js",
         "--mode",
         "strict",
         "--storage",
@@ -143,12 +143,12 @@ Dev example (uses TS loader):
 ```json
 {
   "mcpServers": {
-    "lunara-coordinator-dev": {
+    "lockstep-mcp-dev": {
       "command": "node",
       "args": [
         "--loader",
         "tsx",
-        "/absolute/path/to/lunara-mcp-coordinator/src/server.ts",
+        "/absolute/path/to/lockstep-mcp/src/server.ts",
         "--mode",
         "strict",
         "--storage",

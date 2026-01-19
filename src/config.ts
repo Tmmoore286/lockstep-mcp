@@ -33,7 +33,7 @@ function parseArgValue(args: string[], key: string): string | undefined {
 export function loadConfig(): Config {
   const args = process.argv.slice(2);
   const serverName =
-    parseArgValue(args, "--server-name") || process.env.COORD_SERVER_NAME || "lunara-mcp-coordinator";
+    parseArgValue(args, "--server-name") || process.env.COORD_SERVER_NAME || "lockstep-mcp";
   const serverVersion =
     parseArgValue(args, "--server-version") || process.env.COORD_SERVER_VERSION || "0.1.0";
 
@@ -50,9 +50,9 @@ export function loadConfig(): Config {
   );
 
   const dataDirRaw =
-    parseArgValue(args, "--data-dir") || process.env.COORD_DATA_DIR || "~/.lunara-mcp-coordinator/data";
+    parseArgValue(args, "--data-dir") || process.env.COORD_DATA_DIR || "~/.lockstep-mcp/data";
   const logDirRaw =
-    parseArgValue(args, "--log-dir") || process.env.COORD_LOG_DIR || "~/.lunara-mcp-coordinator/logs";
+    parseArgValue(args, "--log-dir") || process.env.COORD_LOG_DIR || "~/.lockstep-mcp/logs";
   const dataDir = path.resolve(expandHome(dataDirRaw));
   const logDir = path.resolve(expandHome(logDirRaw));
 

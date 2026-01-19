@@ -1,11 +1,11 @@
 {
-  "name": "lunara-mcp-coordinator",
+  "name": "lockstep-mcp",
   "version": "0.1.0",
   "description": "Local MCP coordination server for multi-agent workflows",
   "type": "module",
   "main": "dist/cli.js",
   "bin": {
-    "lunara-mcp-coordinator": "dist/cli.js"
+    "lockstep-mcp": "dist/cli.js"
   },
   "files": [
     "dist",

@@ -57,7 +57,7 @@ export function installMcpEntry(options: InstallOptions) {
   }
 
   const config = loadConfig(configPath);
-  const entryName = options.name ?? "lunara-coordinator";
+  const entryName = options.name ?? "lockstep-mcp";
   const entry = resolveServerEntry();
 
   const args = [...entry.args];

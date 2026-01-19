@@ -21,15 +21,15 @@ function parseArgs(argv: string[]) {
 }
 
 function printHelp() {
-  const text = `lunara-mcp-coordinator
+  const text = `lockstep-mcp
 
 Usage:
-  lunara-mcp-coordinator server [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>] [--data-dir <path>] [--log-dir <path>]
-  lunara-mcp-coordinator install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>]
+  lockstep-mcp server [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>] [--data-dir <path>] [--log-dir <path>]
+  lockstep-mcp install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>]
 
 Examples:
-  lunara-mcp-coordinator server --mode strict --roots /path/to/repo,/tmp --storage sqlite
-  lunara-mcp-coordinator install --config ~/.codex/.mcp.json --mode strict --roots /path/to/repo,/tmp --storage sqlite
+  lockstep-mcp server --mode strict --roots /path/to/repo,/tmp --storage sqlite
+  lockstep-mcp install --config ~/.codex/.mcp.json --mode strict --roots /path/to/repo,/tmp --storage sqlite
 `;
   process.stdout.write(text);
 }

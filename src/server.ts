@@ -1085,24 +1085,29 @@ DO NOT proceed to implementation without explicit user approval.`
             },
 instruction: tasks.length === 0 && inProgressTasks.length === 0
               ? "All tasks complete! Ask the user to verify the work. If satisfied, call project_status_set with status 'complete'. Otherwise create more tasks."
-              : `FIRST STEPS:
+              : `FIRST STEPS (do these IN ORDER):
 1. Call dashboard_open to launch the monitoring dashboard
-2. If this is a NEW SESSION (you just started), implementers from previous sessions may be stale.
-   Call implementer_reset to clear them, then launch_implementer to start fresh workers.
+2. Call implementer_reset to clear stale implementers from previous sessions
+3. ASK THE USER: "Should I use Claude or Codex as the implementer?"
+4. WAIT for their answer before launching any implementers
+5. After user answers, call launch_implementer with their chosen type
 
 ${activeImplementers.length === 0
-  ? `⚠️ NO ACTIVE IMPLEMENTERS! Call: launch_implementer({ type: "${implType}", name: "impl-1" })`
+  ? `⚠️ NO ACTIVE IMPLEMENTERS - but ASK USER first which type they want before launching!`
   : `Active implementers: ${activeImplementers.length}. If they seem stale (not responding), call implementer_reset first.`}
 
-⛔ REMINDER: You are the PLANNER - you are PROHIBITED from writing code or running builds.
+⛔ CRITICAL REMINDERS:
+- You MUST ask the user about implementer type before launching
+- You are PROHIBITED from writing code or running builds
+- DO NOT assume or infer the user's preferences - ASK THEM
 
 Your allowed actions:
 1. dashboard_open - Open monitoring dashboard
-2. implementer_reset - Clear stale implementers from previous sessions
-3. launch_implementer - Start new implementers
-4. task_list, note_list - Monitor progress
-5. task_approve, task_request_changes - Review submitted work
-6. discussion_reply - Answer implementer questions
+2. implementer_reset - Clear stale implementers
+3. ASK user which implementer type they want (claude or codex)
+4. launch_implementer - ONLY after user tells you which type
+5. task_list, note_list - Monitor progress
+6. task_approve, task_request_changes - Review submitted work
 7. project_status_set - Mark complete when done`
           });
         } else {
@@ -1262,13 +1267,14 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
         const isFirstImplementer = existingImplementers.filter(i => i.status === "active").length === 0;
 
         // Build the prompt that will be injected
-        const prompt = `You are implementer ${name}. Run: coordination_init({ role: implementer })`;
+        const prompt = `You are implementer ${name}. Run: coordination_init({ role: "implementer" })`;
 
         // Determine the command to run
-        // Claude uses --print, Codex uses the prompt as an argument
         let terminalCmd: string;
         if (type === "claude") {
-          terminalCmd = `claude --print "${prompt}"`;
+          // Claude: use --dangerously-skip-permissions for autonomous work
+          // Use -p for initial prompt, which will start an interactive session
+          terminalCmd = `claude --dangerously-skip-permissions "${prompt}"`;
         } else {
           // Codex: --full-auto for autonomous work, pass prompt as quoted argument
           terminalCmd = `codex --full-auto "${prompt}"`;

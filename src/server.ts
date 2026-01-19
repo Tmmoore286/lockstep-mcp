@@ -1131,8 +1131,10 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
                 activate
                 do script "cd '${projectRoot}' && node '${cliPath}' dashboard"
               end tell
-              delay 2
-              do shell script "open http://127.0.0.1:8787"
+              delay 3
+              tell application "System Events"
+                open location "http://127.0.0.1:8787"
+              end tell
             `;
             const dashChild = spawn("osascript", ["-e", dashboardScript], {
               detached: true,

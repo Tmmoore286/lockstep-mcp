@@ -31,6 +31,17 @@ The coordinator is a local MCP server with three core layers:
 
 This design keeps the API surface small while supporting safe autonomy.
 
+## Why this project
+Multi‑agent workflows break down when agents overwrite each other or lose context. Lockstep MCP solves that by giving agents a shared source of truth (tasks, locks, notes) while keeping the system local‑first and auditable.
+
+If you are evaluating this as a portfolio piece, the focus is on: reliability, clarity, and practical utility in real collaboration scenarios.
+
+## Design decisions
+- SQLite default for durability and concurrency; JSON remains available for simplicity.
+- Explicit file‑root scoping so agents can’t wander outside agreed boundaries.
+- Command allowlist option to limit automation scope without removing autonomy.
+- Small, composable tool surface to keep integrations straightforward.
+
 ## Install
 From GitHub:
 ```bash

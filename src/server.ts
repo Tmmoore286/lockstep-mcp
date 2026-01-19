@@ -545,6 +545,28 @@ const tools = [
       additionalProperties: false,
     },
   },
+  {
+    name: "implementer_reset",
+    description: "Reset all implementers to 'stopped' status. Use this when starting a fresh session or when implementers are stale/not actually running.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectRoot: { type: "string", description: "Project root to reset implementers for (defaults to first configured root)" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "dashboard_open",
+    description: "Open the lockstep dashboard in a browser. Call this to monitor progress visually.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectRoot: { type: "string", description: "Project root path (defaults to first configured root)" },
+      },
+      additionalProperties: false,
+    },
+  },
   // Discussion tools
   {
     name: "discussion_start",
@@ -1063,23 +1085,25 @@ DO NOT proceed to implementation without explicit user approval.`
             },
 instruction: tasks.length === 0 && inProgressTasks.length === 0
               ? "All tasks complete! Ask the user to verify the work. If satisfied, call project_status_set with status 'complete'. Otherwise create more tasks."
-              : activeImplementers.length === 0
-              ? `⚠️ NO ACTIVE IMPLEMENTERS! You MUST launch an implementer NOW.
+              : `FIRST STEPS:
+1. Call dashboard_open to launch the monitoring dashboard
+2. If this is a NEW SESSION (you just started), implementers from previous sessions may be stale.
+   Call implementer_reset to clear them, then launch_implementer to start fresh workers.
 
-Call: launch_implementer({ type: "${implType}", name: "impl-1" })
+${activeImplementers.length === 0
+  ? `⚠️ NO ACTIVE IMPLEMENTERS! Call: launch_implementer({ type: "${implType}", name: "impl-1" })`
+  : `Active implementers: ${activeImplementers.length}. If they seem stale (not responding), call implementer_reset first.`}
 
-⛔ DO NOT write code, fix bugs, or run builds yourself. Your job is coordination only.
-The implementer will do the actual work once launched.`
-              : `⛔ REMINDER: You are the PLANNER - you are PROHIBITED from writing code or running builds.
+⛔ REMINDER: You are the PLANNER - you are PROHIBITED from writing code or running builds.
 
 Your allowed actions:
-1. Monitor progress via task_list and note_list
-2. Review tasks in "review" status - use task_approve or task_request_changes
-3. Answer implementer questions via discussion_reply
-4. Launch more implementers if needed: launch_implementer with type="${implType}"
-5. When all work is done, set project status to 'complete'
-
-Active implementers: ${activeImplementers.length}. Let them do the implementation work.`
+1. dashboard_open - Open monitoring dashboard
+2. implementer_reset - Clear stale implementers from previous sessions
+3. launch_implementer - Start new implementers
+4. task_list, note_list - Monitor progress
+5. task_approve, task_request_changes - Review submitted work
+6. discussion_reply - Answer implementer questions
+7. project_status_set - Mark complete when done`
           });
         } else {
           // IMPLEMENTER ROLE
@@ -1321,6 +1345,50 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
           active: active.length,
           implementers
         });
+      }
+      case "implementer_reset": {
+        const projectRoot = getString(args.projectRoot) ?? config.roots[0] ?? process.cwd();
+        const count = await store.resetImplementers(projectRoot);
+        await store.appendNote({
+          text: `[SYSTEM] Reset ${count} implementer(s) to stopped status for fresh session`,
+          author: "system"
+        });
+        return jsonResponse({
+          success: true,
+          resetCount: count,
+          message: `Reset ${count} implementer(s) to stopped status. You can now launch fresh implementers.`
+        });
+      }
+      case "dashboard_open": {
+        const projectRoot = getString(args.projectRoot) ?? config.roots[0] ?? process.cwd();
+        try {
+          const escapeForAppleScript = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+          const cliPath = path.resolve(__dirname, "cli.js");
+          const dashCmd = `node "${escapeForAppleScript(cliPath)}" dashboard --roots "${escapeForAppleScript(projectRoot)}"`;
+
+          // Launch dashboard in new terminal
+          spawn("osascript", ["-e", `tell application "Terminal" to do script "${escapeForAppleScript(dashCmd)}"`], {
+            detached: true,
+            stdio: "ignore"
+          }).unref();
+
+          // Open browser after a brief delay
+          spawn("sh", ["-c", "sleep 2 && open http://127.0.0.1:8787"], {
+            detached: true,
+            stdio: "ignore"
+          }).unref();
+
+          return jsonResponse({
+            success: true,
+            message: "Dashboard launching at http://127.0.0.1:8787"
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          return jsonResponse({
+            success: false,
+            error: `Failed to launch dashboard: ${message}`
+          });
+        }
       }
       // Discussion handlers
       case "discussion_start": {

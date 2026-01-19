@@ -182,6 +182,7 @@ export interface Store {
   }): Promise<Implementer>;
   updateImplementer(id: string, status: "active" | "stopped"): Promise<Implementer>;
   listImplementers(projectRoot?: string): Promise<Implementer[]>;
+  resetImplementers(projectRoot: string): Promise<number>;
 
   // Discussion methods
   createDiscussion(input: {
@@ -600,6 +601,24 @@ export class JsonStore implements Store {
       list = list.filter((impl) => impl.projectRoot === projectRoot);
     }
     return list;
+  }
+
+  async resetImplementers(projectRoot: string): Promise<number> {
+    return this.withStateLock(async () => {
+      const implementers = await this.loadImplementers();
+      let count = 0;
+      for (const id of Object.keys(implementers)) {
+        const impl = implementers[id];
+        if (impl.projectRoot === projectRoot && impl.status === "active") {
+          impl.status = "stopped";
+          impl.updatedAt = nowIso();
+          count++;
+        }
+      }
+      await this.saveImplementers(implementers);
+      await appendLog(this.logDir, "implementers_reset", { projectRoot, count });
+      return count;
+    });
   }
 
   // Discussion methods - not implemented for JSON storage (use SQLite)
@@ -1377,6 +1396,16 @@ export class SqliteStore implements Store {
       rows = db.prepare("SELECT * FROM implementers ORDER BY created_at ASC").all() as ImplementerRow[];
     }
     return rows.map((row) => this.parseImplementer(row));
+  }
+
+  async resetImplementers(projectRoot: string): Promise<number> {
+    const db = this.getDb();
+    const updatedAt = nowIso();
+    const result = db.prepare(
+      "UPDATE implementers SET status = 'stopped', updated_at = ? WHERE project_root = ? AND status = 'active'"
+    ).run(updatedAt, projectRoot);
+    await appendLog(this.logDir, "implementers_reset", { projectRoot, count: result.changes });
+    return result.changes;
   }
 
   // Discussion methods

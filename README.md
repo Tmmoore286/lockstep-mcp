@@ -98,6 +98,7 @@ lockstep-mcp macos --repo /absolute/path/to/your/repo
 ```
 
 This opens three Terminal windows (Claude, Codex, Dashboard).
+macOS may prompt for automation permission; allow it so the launcher can open Terminal windows.
 
 ## Agent self-install (Codex/Claude)
 If the agent has full access, it can install and register the MCP entry itself:

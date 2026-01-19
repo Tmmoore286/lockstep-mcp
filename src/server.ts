@@ -1120,10 +1120,15 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
           // Launch dashboard first if this is the first implementer
           if (isFirstImplementer) {
             const cliPath = path.resolve(__dirname, "cli.js");
-            const dashCmd = `cd "${escapeForAppleScript(projectRoot)}" && node "${escapeForAppleScript(cliPath)}" dashboard`;
-            execSync(`osascript -e 'tell application "Terminal" to do script "${escapeForAppleScript(dashCmd)}"'`, { stdio: "ignore" });
+            // Pass --roots so dashboard knows which project to display
+            const dashCmd = `node "${escapeForAppleScript(cliPath)}" dashboard --roots "${escapeForAppleScript(projectRoot)}"`;
+            // Use spawn instead of execSync to avoid blocking/session issues
+            spawn("osascript", ["-e", `tell application "Terminal" to do script "${escapeForAppleScript(dashCmd)}"`], {
+              detached: true,
+              stdio: "ignore"
+            }).unref();
             // Open browser after a brief delay (in background)
-            spawn("sh", ["-c", "sleep 2 && open http://127.0.0.1:8787"], {
+            spawn("sh", ["-c", "sleep 3 && open http://127.0.0.1:8787"], {
               detached: true,
               stdio: "ignore"
             }).unref();
@@ -1131,7 +1136,11 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
 
           // Launch the implementer terminal
           const implCmd = `cd "${escapeForAppleScript(projectRoot)}" && ${terminalCmd}`;
-          execSync(`osascript -e 'tell application "Terminal" to do script "${escapeForAppleScript(implCmd)}"'`, { stdio: "ignore" });
+          // Use spawn instead of execSync to avoid blocking/session issues
+          spawn("osascript", ["-e", `tell application "Terminal" to do script "${escapeForAppleScript(implCmd)}"`], {
+            detached: true,
+            stdio: "ignore"
+          }).unref();
 
           // Register the implementer (no PID since Terminal manages the process)
           const implementer = await store.registerImplementer({

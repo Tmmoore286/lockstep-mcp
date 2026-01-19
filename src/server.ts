@@ -1,7 +1,7 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
-import { spawn } from "node:child_process";
+import { spawn, execSync } from "node:child_process";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1113,48 +1113,32 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
           terminalCmd = `codex --full-auto "${prompt}"`;
         }
 
-        // Launch in a new terminal window (macOS)
-        const osascript = `
-          tell application "Terminal"
-            activate
-            do script "cd '${projectRoot}' && ${terminalCmd}"
-          end tell
-        `;
-
         try {
+          // Helper to escape strings for AppleScript inside shell
+          const escapeForAppleScript = (s: string) => s.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
+
           // Launch dashboard first if this is the first implementer
           if (isFirstImplementer) {
-            // Use full path to cli.js instead of relying on lockstep-mcp being in PATH
             const cliPath = path.resolve(__dirname, "cli.js");
-            const dashboardScript = `
-              tell application "Terminal"
-                activate
-                do script "cd '${projectRoot}' && node '${cliPath}' dashboard"
-              end tell
-              delay 3
-              tell application "System Events"
-                open location "http://127.0.0.1:8787"
-              end tell
-            `;
-            const dashChild = spawn("osascript", ["-e", dashboardScript], {
+            const dashCmd = `cd "${escapeForAppleScript(projectRoot)}" && node "${escapeForAppleScript(cliPath)}" dashboard`;
+            execSync(`osascript -e 'tell application "Terminal" to do script "${escapeForAppleScript(dashCmd)}"'`, { stdio: "ignore" });
+            // Open browser after a brief delay (in background)
+            spawn("sh", ["-c", "sleep 2 && open http://127.0.0.1:8787"], {
               detached: true,
               stdio: "ignore"
-            });
-            dashChild.unref();
+            }).unref();
           }
 
-          const child = spawn("osascript", ["-e", osascript], {
-            detached: true,
-            stdio: "ignore"
-          });
-          child.unref();
+          // Launch the implementer terminal
+          const implCmd = `cd "${escapeForAppleScript(projectRoot)}" && ${terminalCmd}`;
+          execSync(`osascript -e 'tell application "Terminal" to do script "${escapeForAppleScript(implCmd)}"'`, { stdio: "ignore" });
 
-          // Register the implementer
+          // Register the implementer (no PID since Terminal manages the process)
           const implementer = await store.registerImplementer({
             name,
             type,
             projectRoot,
-            pid: child.pid
+            pid: undefined
           });
 
           // Update project status to in_progress if it was ready

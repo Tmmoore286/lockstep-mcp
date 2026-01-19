@@ -1,5 +1,5 @@
 import { installMcpEntry } from "./install.js";
-import { getAutopilotPrompts } from "./prompts.js";
+import { getAutopilotPrompts, getPlannerPrompt, getImplementerPrompt } from "./prompts.js";
 
 function parseArgs(argv: string[]) {
   const args: Record<string, string | boolean> = {};
@@ -27,12 +27,14 @@ function printHelp() {
 Usage:
   lockstep-mcp server [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>] [--data-dir <path>] [--log-dir <path>]
   lockstep-mcp dashboard [--host <host>] [--port <port>] [--poll-ms <ms>]
-  lockstep-mcp prompts
+  lockstep-mcp tmux [--repo <path>] [--session <name>] [--claude-cmd <cmd>] [--codex-cmd <cmd>] [--no-prompts]
+  lockstep-mcp prompts [--role planner|implementer]
   lockstep-mcp install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>]
 
 Examples:
   lockstep-mcp server --mode strict --roots /path/to/repo,/tmp --storage sqlite
   lockstep-mcp dashboard --host 127.0.0.1 --port 8787
+  lockstep-mcp tmux --repo /path/to/repo
   lockstep-mcp install --config ~/.codex/.mcp.json --mode strict --roots /path/to/repo,/tmp --storage sqlite
   lockstep-mcp prompts
 `;
@@ -68,6 +70,15 @@ async function main() {
   }
 
   if (command === "prompts") {
+    const role = typeof args["--role"] === "string" ? args["--role"] : undefined;
+    if (role === "planner") {
+      process.stdout.write(getPlannerPrompt());
+      return;
+    }
+    if (role === "implementer") {
+      process.stdout.write(getImplementerPrompt());
+      return;
+    }
     process.stdout.write(getAutopilotPrompts());
     return;
   }
@@ -78,6 +89,17 @@ async function main() {
     const host = typeof args["--host"] === "string" ? args["--host"] : undefined;
     const pollMs = typeof args["--poll-ms"] === "string" ? Number(args["--poll-ms"]) : undefined;
     await startDashboard({ port, host, pollMs });
+    return;
+  }
+
+  if (command === "tmux") {
+    const { launchTmux } = await import("./tmux.js");
+    const repo = typeof args["--repo"] === "string" ? args["--repo"] : undefined;
+    const session = typeof args["--session"] === "string" ? args["--session"] : undefined;
+    const claudeCmd = typeof args["--claude-cmd"] === "string" ? args["--claude-cmd"] : undefined;
+    const codexCmd = typeof args["--codex-cmd"] === "string" ? args["--codex-cmd"] : undefined;
+    const injectPrompts = args["--no-prompts"] ? false : true;
+    await launchTmux({ repo, session, claudeCmd, codexCmd, injectPrompts });
     return;
   }
 

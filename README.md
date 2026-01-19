@@ -64,6 +64,19 @@ npm run install:mcp -- --config /path/to/.mcp.json --mode strict --roots /absolu
 ```
 Restart your MCP client so it picks up the new server entry.
 
+## One-command tmux launcher
+This launches Claude + Codex in a tmux split and auto-injects the autonomy prompts:
+
+```bash
+lockstep-mcp tmux --repo /absolute/path/to/your/repo
+```
+
+Options:
+- `--session <name>` set tmux session name (default: `lockstep`)
+- `--claude-cmd <cmd>` override Claude command (default: `claude`)
+- `--codex-cmd <cmd>` override Codex command (default: `codex`)
+- `--no-prompts` start panes without auto-injected prompts
+
 ## Agent self-install (Codex/Claude)
 If the agent has full access, it can install and register the MCP entry itself:
 

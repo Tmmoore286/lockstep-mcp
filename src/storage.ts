@@ -36,6 +36,67 @@ export type Note = {
   createdAt: string;
 };
 
+export type ProjectStatus = "planning" | "ready" | "in_progress" | "complete" | "stopped";
+
+export type ProjectContext = {
+  projectRoot: string;
+  description: string;
+  endState: string;
+  techStack?: string[];
+  constraints?: string[];
+  acceptanceCriteria?: string[];
+  tests?: string[];
+  implementationPlan?: string[];
+  preferredImplementer?: "claude" | "codex";
+  status: ProjectStatus;
+  createdAt: string;
+  updatedAt: string;
+};
+
+export type Implementer = {
+  id: string;
+  name: string;
+  type: "claude" | "codex";
+  projectRoot: string;
+  status: "active" | "stopped";
+  pid?: number;
+  createdAt: string;
+  updatedAt: string;
+};
+
+// Discussion Thread System
+export type DiscussionStatus = "open" | "waiting" | "resolved" | "archived";
+export type DiscussionCategory = "architecture" | "implementation" | "blocker" | "question" | "other";
+export type DiscussionPriority = "low" | "medium" | "high" | "blocking";
+
+export type Discussion = {
+  id: string;
+  topic: string;
+  category: DiscussionCategory;
+  priority: DiscussionPriority;
+  status: DiscussionStatus;
+  projectRoot: string;
+  createdBy: string;
+  waitingOn?: string;  // Which agent is expected to respond
+  decision?: string;
+  decisionReasoning?: string;
+  decidedBy?: string;
+  linkedTaskId?: string;  // Task spawned from this decision
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+  archivedAt?: string;
+};
+
+export type DiscussionMessage = {
+  id: string;
+  discussionId: string;
+  author: string;
+  message: string;
+  recommendation?: string;  // Optional vote/recommendation
+  createdAt: string;
+};
+
 export type State = {
   tasks: Task[];
   locks: Lock[];
@@ -75,6 +136,77 @@ export interface Store {
   appendNote(input: { text: string; author?: string }): Promise<Note>;
   listNotes(limit?: number): Promise<Note[]>;
   appendLogEntry(event: string, payload?: Record<string, unknown>): Promise<void>;
+  setProjectContext(input: {
+    projectRoot: string;
+    description: string;
+    endState: string;
+    techStack?: string[];
+    constraints?: string[];
+    acceptanceCriteria?: string[];
+    tests?: string[];
+    implementationPlan?: string[];
+    preferredImplementer?: "claude" | "codex";
+    status?: ProjectStatus;
+  }): Promise<ProjectContext>;
+  getProjectContext(projectRoot: string): Promise<ProjectContext | null>;
+  updateProjectStatus(projectRoot: string, status: ProjectStatus): Promise<ProjectContext>;
+  registerImplementer(input: {
+    name: string;
+    type: "claude" | "codex";
+    projectRoot: string;
+    pid?: number;
+  }): Promise<Implementer>;
+  updateImplementer(id: string, status: "active" | "stopped"): Promise<Implementer>;
+  listImplementers(projectRoot?: string): Promise<Implementer[]>;
+
+  // Discussion methods
+  createDiscussion(input: {
+    topic: string;
+    category: DiscussionCategory;
+    priority: DiscussionPriority;
+    message: string;
+    createdBy: string;
+    projectRoot: string;
+    waitingOn?: string;
+  }): Promise<{ discussion: Discussion; message: DiscussionMessage }>;
+
+  replyToDiscussion(input: {
+    discussionId: string;
+    author: string;
+    message: string;
+    recommendation?: string;
+    waitingOn?: string;
+  }): Promise<{ discussion: Discussion; message: DiscussionMessage }>;
+
+  resolveDiscussion(input: {
+    discussionId: string;
+    decision: string;
+    reasoning: string;
+    decidedBy: string;
+    linkedTaskId?: string;
+  }): Promise<Discussion>;
+
+  getDiscussion(id: string): Promise<{ discussion: Discussion; messages: DiscussionMessage[] } | null>;
+
+  listDiscussions(filters?: {
+    status?: DiscussionStatus;
+    category?: DiscussionCategory;
+    projectRoot?: string;
+    waitingOn?: string;
+    limit?: number;
+  }): Promise<Discussion[]>;
+
+  archiveDiscussion(id: string): Promise<Discussion>;
+
+  archiveOldDiscussions(options: {
+    olderThanDays?: number;  // Archive resolved discussions older than X days
+    projectRoot?: string;
+  }): Promise<number>;  // Returns count of archived
+
+  deleteArchivedDiscussions(options: {
+    olderThanDays?: number;  // Delete archived discussions older than X days
+    projectRoot?: string;
+  }): Promise<number>;  // Returns count of deleted
 }
 
 function nowIso(): string {
@@ -93,13 +225,17 @@ const DEFAULT_STATE: State = {
   notes: [],
 };
 
+type ProjectContextStore = Record<string, ProjectContext>;
+
 export class JsonStore implements Store {
   private statePath: string;
   private lockPath: string;
+  private contextPath: string;
 
   constructor(private dataDir: string, private logDir: string) {
     this.statePath = path.join(this.dataDir, "state.json");
     this.lockPath = path.join(this.dataDir, "state.lock");
+    this.contextPath = path.join(this.dataDir, "project_contexts.json");
   }
 
   async init(): Promise<void> {
@@ -293,6 +429,167 @@ export class JsonStore implements Store {
   async appendLogEntry(event: string, payload?: Record<string, unknown>): Promise<void> {
     await appendLog(this.logDir, event, payload ?? {});
   }
+
+  private async loadContexts(): Promise<ProjectContextStore> {
+    try {
+      const raw = await fs.readFile(this.contextPath, "utf8");
+      return JSON.parse(raw) as ProjectContextStore;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return {};
+      throw error;
+    }
+  }
+
+  private async saveContexts(contexts: ProjectContextStore): Promise<void> {
+    await fs.writeFile(this.contextPath, JSON.stringify(contexts, null, 2), "utf8");
+  }
+
+  async setProjectContext(input: {
+    projectRoot: string;
+    description: string;
+    endState: string;
+    techStack?: string[];
+    constraints?: string[];
+    acceptanceCriteria?: string[];
+    tests?: string[];
+    implementationPlan?: string[];
+    preferredImplementer?: "claude" | "codex";
+    status?: ProjectStatus;
+  }): Promise<ProjectContext> {
+    return this.withStateLock(async () => {
+      const contexts = await this.loadContexts();
+      const existing = contexts[input.projectRoot];
+      const context: ProjectContext = {
+        projectRoot: input.projectRoot,
+        description: input.description,
+        endState: input.endState,
+        techStack: input.techStack,
+        constraints: input.constraints,
+        acceptanceCriteria: input.acceptanceCriteria,
+        tests: input.tests,
+        implementationPlan: input.implementationPlan,
+        preferredImplementer: input.preferredImplementer ?? existing?.preferredImplementer,
+        status: input.status ?? existing?.status ?? "planning",
+        createdAt: existing?.createdAt ?? nowIso(),
+        updatedAt: nowIso(),
+      };
+      contexts[input.projectRoot] = context;
+      await this.saveContexts(contexts);
+      await appendLog(this.logDir, "project_context_set", { context });
+      return context;
+    });
+  }
+
+  async getProjectContext(projectRoot: string): Promise<ProjectContext | null> {
+    const contexts = await this.loadContexts();
+    return contexts[projectRoot] ?? null;
+  }
+
+  async updateProjectStatus(projectRoot: string, status: ProjectStatus): Promise<ProjectContext> {
+    return this.withStateLock(async () => {
+      const contexts = await this.loadContexts();
+      const existing = contexts[projectRoot];
+      if (!existing) throw new Error(`Project context not found: ${projectRoot}`);
+      existing.status = status;
+      existing.updatedAt = nowIso();
+      await this.saveContexts(contexts);
+      await appendLog(this.logDir, "project_status_update", { projectRoot, status });
+      return existing;
+    });
+  }
+
+  private get implementersPath(): string {
+    return path.join(this.dataDir, "implementers.json");
+  }
+
+  private async loadImplementers(): Promise<Record<string, Implementer>> {
+    try {
+      const raw = await fs.readFile(this.implementersPath, "utf8");
+      return JSON.parse(raw) as Record<string, Implementer>;
+    } catch (error) {
+      const err = error as NodeJS.ErrnoException;
+      if (err.code === "ENOENT") return {};
+      throw error;
+    }
+  }
+
+  private async saveImplementers(implementers: Record<string, Implementer>): Promise<void> {
+    await fs.writeFile(this.implementersPath, JSON.stringify(implementers, null, 2), "utf8");
+  }
+
+  async registerImplementer(input: {
+    name: string;
+    type: "claude" | "codex";
+    projectRoot: string;
+    pid?: number;
+  }): Promise<Implementer> {
+    return this.withStateLock(async () => {
+      const implementers = await this.loadImplementers();
+      const implementer: Implementer = {
+        id: crypto.randomUUID(),
+        name: input.name,
+        type: input.type,
+        projectRoot: input.projectRoot,
+        status: "active",
+        pid: input.pid,
+        createdAt: nowIso(),
+        updatedAt: nowIso(),
+      };
+      implementers[implementer.id] = implementer;
+      await this.saveImplementers(implementers);
+      await appendLog(this.logDir, "implementer_register", { implementer });
+      return implementer;
+    });
+  }
+
+  async updateImplementer(id: string, status: "active" | "stopped"): Promise<Implementer> {
+    return this.withStateLock(async () => {
+      const implementers = await this.loadImplementers();
+      const implementer = implementers[id];
+      if (!implementer) throw new Error(`Implementer not found: ${id}`);
+      implementer.status = status;
+      implementer.updatedAt = nowIso();
+      await this.saveImplementers(implementers);
+      await appendLog(this.logDir, "implementer_update", { implementer });
+      return implementer;
+    });
+  }
+
+  async listImplementers(projectRoot?: string): Promise<Implementer[]> {
+    const implementers = await this.loadImplementers();
+    let list = Object.values(implementers);
+    if (projectRoot) {
+      list = list.filter((impl) => impl.projectRoot === projectRoot);
+    }
+    return list;
+  }
+
+  // Discussion methods - not implemented for JSON storage (use SQLite)
+  async createDiscussion(): Promise<{ discussion: Discussion; message: DiscussionMessage }> {
+    throw new Error("Discussion features require SQLite storage. Set storage: 'sqlite' in config.");
+  }
+  async replyToDiscussion(): Promise<{ discussion: Discussion; message: DiscussionMessage }> {
+    throw new Error("Discussion features require SQLite storage.");
+  }
+  async resolveDiscussion(): Promise<Discussion> {
+    throw new Error("Discussion features require SQLite storage.");
+  }
+  async getDiscussion(): Promise<{ discussion: Discussion; messages: DiscussionMessage[] } | null> {
+    throw new Error("Discussion features require SQLite storage.");
+  }
+  async listDiscussions(): Promise<Discussion[]> {
+    throw new Error("Discussion features require SQLite storage.");
+  }
+  async archiveDiscussion(): Promise<Discussion> {
+    throw new Error("Discussion features require SQLite storage.");
+  }
+  async archiveOldDiscussions(): Promise<number> {
+    throw new Error("Discussion features require SQLite storage.");
+  }
+  async deleteArchivedDiscussions(): Promise<number> {
+    throw new Error("Discussion features require SQLite storage.");
+  }
 }
 
 type TaskRow = {
@@ -320,6 +617,60 @@ type NoteRow = {
   id: string;
   text: string;
   author: string | null;
+  created_at: string;
+};
+
+type ProjectContextRow = {
+  project_root: string;
+  description: string;
+  end_state: string;
+  tech_stack: string | null;
+  constraints: string | null;
+  acceptance_criteria: string | null;
+  tests: string | null;
+  implementation_plan: string | null;
+  preferred_implementer: string | null;
+  status: string;
+  created_at: string;
+  updated_at: string;
+};
+
+type ImplementerRow = {
+  id: string;
+  name: string;
+  type: string;
+  project_root: string;
+  status: string;
+  pid: number | null;
+  created_at: string;
+  updated_at: string;
+};
+
+type DiscussionRow = {
+  id: string;
+  topic: string;
+  category: string;
+  priority: string;
+  status: string;
+  project_root: string;
+  created_by: string;
+  waiting_on: string | null;
+  decision: string | null;
+  decision_reasoning: string | null;
+  decided_by: string | null;
+  linked_task_id: string | null;
+  created_at: string;
+  updated_at: string;
+  resolved_at: string | null;
+  archived_at: string | null;
+};
+
+type DiscussionMessageRow = {
+  id: string;
+  discussion_id: string;
+  author: string;
+  message: string;
+  recommendation: string | null;
   created_at: string;
 };
 
@@ -361,7 +712,82 @@ export class SqliteStore implements Store {
         author TEXT,
         created_at TEXT NOT NULL
       );
+
+      CREATE TABLE IF NOT EXISTS project_contexts (
+        project_root TEXT PRIMARY KEY,
+        description TEXT NOT NULL,
+        end_state TEXT NOT NULL,
+        tech_stack TEXT,
+        constraints TEXT,
+        acceptance_criteria TEXT,
+        tests TEXT,
+        implementation_plan TEXT,
+        status TEXT NOT NULL DEFAULT 'planning',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS implementers (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        type TEXT NOT NULL,
+        project_root TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'active',
+        pid INTEGER,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+      );
+
+      CREATE TABLE IF NOT EXISTS discussions (
+        id TEXT PRIMARY KEY,
+        topic TEXT NOT NULL,
+        category TEXT NOT NULL DEFAULT 'other',
+        priority TEXT NOT NULL DEFAULT 'medium',
+        status TEXT NOT NULL DEFAULT 'open',
+        project_root TEXT NOT NULL,
+        created_by TEXT NOT NULL,
+        waiting_on TEXT,
+        decision TEXT,
+        decision_reasoning TEXT,
+        decided_by TEXT,
+        linked_task_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        resolved_at TEXT,
+        archived_at TEXT
+      );
+
+      CREATE TABLE IF NOT EXISTS discussion_messages (
+        id TEXT PRIMARY KEY,
+        discussion_id TEXT NOT NULL,
+        author TEXT NOT NULL,
+        message TEXT NOT NULL,
+        recommendation TEXT,
+        created_at TEXT NOT NULL,
+        FOREIGN KEY (discussion_id) REFERENCES discussions(id)
+      );
+
+      CREATE INDEX IF NOT EXISTS idx_discussions_status ON discussions(status);
+      CREATE INDEX IF NOT EXISTS idx_discussions_project ON discussions(project_root);
+      CREATE INDEX IF NOT EXISTS idx_discussion_messages_discussion ON discussion_messages(discussion_id);
     `);
+
+    // Migration: add new columns if they don't exist
+    try {
+      this.db.exec("ALTER TABLE project_contexts ADD COLUMN acceptance_criteria TEXT");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE project_contexts ADD COLUMN tests TEXT");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE project_contexts ADD COLUMN implementation_plan TEXT");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE project_contexts ADD COLUMN preferred_implementer TEXT");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE project_contexts ADD COLUMN status TEXT NOT NULL DEFAULT 'planning'");
+    } catch { /* column exists */ }
   }
 
   private getDb(): Database.Database {
@@ -624,6 +1050,494 @@ export class SqliteStore implements Store {
 
   async appendLogEntry(event: string, payload?: Record<string, unknown>): Promise<void> {
     await appendLog(this.logDir, event, payload ?? {});
+  }
+
+  private parseProjectContext(row: ProjectContextRow): ProjectContext {
+    return {
+      projectRoot: row.project_root,
+      description: row.description,
+      endState: row.end_state,
+      techStack: row.tech_stack ? (JSON.parse(row.tech_stack) as string[]) : undefined,
+      constraints: row.constraints ? (JSON.parse(row.constraints) as string[]) : undefined,
+      acceptanceCriteria: row.acceptance_criteria ? (JSON.parse(row.acceptance_criteria) as string[]) : undefined,
+      tests: row.tests ? (JSON.parse(row.tests) as string[]) : undefined,
+      implementationPlan: row.implementation_plan ? (JSON.parse(row.implementation_plan) as string[]) : undefined,
+      preferredImplementer: row.preferred_implementer as "claude" | "codex" | undefined,
+      status: (row.status as ProjectStatus) ?? "planning",
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  private parseImplementer(row: ImplementerRow): Implementer {
+    return {
+      id: row.id,
+      name: row.name,
+      type: row.type as "claude" | "codex",
+      projectRoot: row.project_root,
+      status: row.status as "active" | "stopped",
+      pid: row.pid ?? undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+    };
+  }
+
+  async setProjectContext(input: {
+    projectRoot: string;
+    description: string;
+    endState: string;
+    techStack?: string[];
+    constraints?: string[];
+    acceptanceCriteria?: string[];
+    tests?: string[];
+    implementationPlan?: string[];
+    preferredImplementer?: "claude" | "codex";
+    status?: ProjectStatus;
+  }): Promise<ProjectContext> {
+    const db = this.getDb();
+    const existing = db
+      .prepare("SELECT * FROM project_contexts WHERE project_root = ?")
+      .get(input.projectRoot) as ProjectContextRow | undefined;
+
+    const context: ProjectContext = {
+      projectRoot: input.projectRoot,
+      description: input.description,
+      endState: input.endState,
+      techStack: input.techStack,
+      constraints: input.constraints,
+      acceptanceCriteria: input.acceptanceCriteria,
+      tests: input.tests,
+      implementationPlan: input.implementationPlan,
+      preferredImplementer: input.preferredImplementer ?? existing?.preferred_implementer as "claude" | "codex" | undefined,
+      status: input.status ?? existing?.status as ProjectStatus ?? "planning",
+      createdAt: existing?.created_at ?? nowIso(),
+      updatedAt: nowIso(),
+    };
+
+    if (existing) {
+      db.prepare(
+        `UPDATE project_contexts
+         SET description = ?, end_state = ?, tech_stack = ?, constraints = ?,
+             acceptance_criteria = ?, tests = ?, implementation_plan = ?, preferred_implementer = ?, status = ?, updated_at = ?
+         WHERE project_root = ?`
+      ).run(
+        context.description,
+        context.endState,
+        context.techStack ? JSON.stringify(context.techStack) : null,
+        context.constraints ? JSON.stringify(context.constraints) : null,
+        context.acceptanceCriteria ? JSON.stringify(context.acceptanceCriteria) : null,
+        context.tests ? JSON.stringify(context.tests) : null,
+        context.implementationPlan ? JSON.stringify(context.implementationPlan) : null,
+        context.preferredImplementer ?? null,
+        context.status,
+        context.updatedAt,
+        context.projectRoot
+      );
+    } else {
+      db.prepare(
+        `INSERT INTO project_contexts (project_root, description, end_state, tech_stack, constraints,
+         acceptance_criteria, tests, implementation_plan, preferred_implementer, status, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      ).run(
+        context.projectRoot,
+        context.description,
+        context.endState,
+        context.techStack ? JSON.stringify(context.techStack) : null,
+        context.constraints ? JSON.stringify(context.constraints) : null,
+        context.acceptanceCriteria ? JSON.stringify(context.acceptanceCriteria) : null,
+        context.tests ? JSON.stringify(context.tests) : null,
+        context.implementationPlan ? JSON.stringify(context.implementationPlan) : null,
+        context.preferredImplementer ?? null,
+        context.status,
+        context.createdAt,
+        context.updatedAt
+      );
+    }
+
+    await appendLog(this.logDir, "project_context_set", { context });
+    return context;
+  }
+
+  async getProjectContext(projectRoot: string): Promise<ProjectContext | null> {
+    const db = this.getDb();
+    const row = db
+      .prepare("SELECT * FROM project_contexts WHERE project_root = ?")
+      .get(projectRoot) as ProjectContextRow | undefined;
+    return row ? this.parseProjectContext(row) : null;
+  }
+
+  async updateProjectStatus(projectRoot: string, status: ProjectStatus): Promise<ProjectContext> {
+    const db = this.getDb();
+    const row = db
+      .prepare("SELECT * FROM project_contexts WHERE project_root = ?")
+      .get(projectRoot) as ProjectContextRow | undefined;
+    if (!row) throw new Error(`Project context not found: ${projectRoot}`);
+
+    const updatedAt = nowIso();
+    db.prepare("UPDATE project_contexts SET status = ?, updated_at = ? WHERE project_root = ?")
+      .run(status, updatedAt, projectRoot);
+
+    await appendLog(this.logDir, "project_status_update", { projectRoot, status });
+
+    const updated = db
+      .prepare("SELECT * FROM project_contexts WHERE project_root = ?")
+      .get(projectRoot) as ProjectContextRow;
+    return this.parseProjectContext(updated);
+  }
+
+  async registerImplementer(input: {
+    name: string;
+    type: "claude" | "codex";
+    projectRoot: string;
+    pid?: number;
+  }): Promise<Implementer> {
+    const db = this.getDb();
+    const implementer: Implementer = {
+      id: crypto.randomUUID(),
+      name: input.name,
+      type: input.type,
+      projectRoot: input.projectRoot,
+      status: "active",
+      pid: input.pid,
+      createdAt: nowIso(),
+      updatedAt: nowIso(),
+    };
+
+    db.prepare(
+      `INSERT INTO implementers (id, name, type, project_root, status, pid, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      implementer.id,
+      implementer.name,
+      implementer.type,
+      implementer.projectRoot,
+      implementer.status,
+      implementer.pid ?? null,
+      implementer.createdAt,
+      implementer.updatedAt
+    );
+
+    await appendLog(this.logDir, "implementer_register", { implementer });
+    return implementer;
+  }
+
+  async updateImplementer(id: string, status: "active" | "stopped"): Promise<Implementer> {
+    const db = this.getDb();
+    const row = db.prepare("SELECT * FROM implementers WHERE id = ?").get(id) as ImplementerRow | undefined;
+    if (!row) throw new Error(`Implementer not found: ${id}`);
+
+    const updatedAt = nowIso();
+    db.prepare("UPDATE implementers SET status = ?, updated_at = ? WHERE id = ?")
+      .run(status, updatedAt, id);
+
+    await appendLog(this.logDir, "implementer_update", { id, status });
+
+    const updated = db.prepare("SELECT * FROM implementers WHERE id = ?").get(id) as ImplementerRow;
+    return this.parseImplementer(updated);
+  }
+
+  async listImplementers(projectRoot?: string): Promise<Implementer[]> {
+    const db = this.getDb();
+    let rows: ImplementerRow[];
+    if (projectRoot) {
+      rows = db.prepare("SELECT * FROM implementers WHERE project_root = ? ORDER BY created_at ASC")
+        .all(projectRoot) as ImplementerRow[];
+    } else {
+      rows = db.prepare("SELECT * FROM implementers ORDER BY created_at ASC").all() as ImplementerRow[];
+    }
+    return rows.map((row) => this.parseImplementer(row));
+  }
+
+  // Discussion methods
+  private parseDiscussion(row: DiscussionRow): Discussion {
+    return {
+      id: row.id,
+      topic: row.topic,
+      category: row.category as DiscussionCategory,
+      priority: row.priority as DiscussionPriority,
+      status: row.status as DiscussionStatus,
+      projectRoot: row.project_root,
+      createdBy: row.created_by,
+      waitingOn: row.waiting_on ?? undefined,
+      decision: row.decision ?? undefined,
+      decisionReasoning: row.decision_reasoning ?? undefined,
+      decidedBy: row.decided_by ?? undefined,
+      linkedTaskId: row.linked_task_id ?? undefined,
+      createdAt: row.created_at,
+      updatedAt: row.updated_at,
+      resolvedAt: row.resolved_at ?? undefined,
+      archivedAt: row.archived_at ?? undefined,
+    };
+  }
+
+  private parseDiscussionMessage(row: DiscussionMessageRow): DiscussionMessage {
+    return {
+      id: row.id,
+      discussionId: row.discussion_id,
+      author: row.author,
+      message: row.message,
+      recommendation: row.recommendation ?? undefined,
+      createdAt: row.created_at,
+    };
+  }
+
+  async createDiscussion(input: {
+    topic: string;
+    category: DiscussionCategory;
+    priority: DiscussionPriority;
+    message: string;
+    createdBy: string;
+    projectRoot: string;
+    waitingOn?: string;
+  }): Promise<{ discussion: Discussion; message: DiscussionMessage }> {
+    const db = this.getDb();
+    const now = nowIso();
+
+    const discussion: Discussion = {
+      id: crypto.randomUUID(),
+      topic: input.topic,
+      category: input.category,
+      priority: input.priority,
+      status: input.waitingOn ? "waiting" : "open",
+      projectRoot: input.projectRoot,
+      createdBy: input.createdBy,
+      waitingOn: input.waitingOn,
+      createdAt: now,
+      updatedAt: now,
+    };
+
+    const msg: DiscussionMessage = {
+      id: crypto.randomUUID(),
+      discussionId: discussion.id,
+      author: input.createdBy,
+      message: input.message,
+      createdAt: now,
+    };
+
+    db.prepare(
+      `INSERT INTO discussions (id, topic, category, priority, status, project_root, created_by, waiting_on, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(
+      discussion.id,
+      discussion.topic,
+      discussion.category,
+      discussion.priority,
+      discussion.status,
+      discussion.projectRoot,
+      discussion.createdBy,
+      discussion.waitingOn ?? null,
+      discussion.createdAt,
+      discussion.updatedAt
+    );
+
+    db.prepare(
+      `INSERT INTO discussion_messages (id, discussion_id, author, message, recommendation, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(msg.id, msg.discussionId, msg.author, msg.message, null, msg.createdAt);
+
+    await appendLog(this.logDir, "discussion_create", { discussion, message: msg });
+    return { discussion, message: msg };
+  }
+
+  async replyToDiscussion(input: {
+    discussionId: string;
+    author: string;
+    message: string;
+    recommendation?: string;
+    waitingOn?: string;
+  }): Promise<{ discussion: Discussion; message: DiscussionMessage }> {
+    const db = this.getDb();
+    const now = nowIso();
+
+    const row = db.prepare("SELECT * FROM discussions WHERE id = ?").get(input.discussionId) as DiscussionRow | undefined;
+    if (!row) throw new Error(`Discussion not found: ${input.discussionId}`);
+    if (row.status === "resolved" || row.status === "archived") {
+      throw new Error(`Cannot reply to ${row.status} discussion`);
+    }
+
+    const msg: DiscussionMessage = {
+      id: crypto.randomUUID(),
+      discussionId: input.discussionId,
+      author: input.author,
+      message: input.message,
+      recommendation: input.recommendation,
+      createdAt: now,
+    };
+
+    db.prepare(
+      `INSERT INTO discussion_messages (id, discussion_id, author, message, recommendation, created_at)
+       VALUES (?, ?, ?, ?, ?, ?)`
+    ).run(msg.id, msg.discussionId, msg.author, msg.message, msg.recommendation ?? null, msg.createdAt);
+
+    // Update discussion status and waiting_on
+    const newStatus = input.waitingOn ? "waiting" : "open";
+    db.prepare(
+      `UPDATE discussions SET status = ?, waiting_on = ?, updated_at = ? WHERE id = ?`
+    ).run(newStatus, input.waitingOn ?? null, now, input.discussionId);
+
+    const updated = db.prepare("SELECT * FROM discussions WHERE id = ?").get(input.discussionId) as DiscussionRow;
+    await appendLog(this.logDir, "discussion_reply", { discussion: this.parseDiscussion(updated), message: msg });
+    return { discussion: this.parseDiscussion(updated), message: msg };
+  }
+
+  async resolveDiscussion(input: {
+    discussionId: string;
+    decision: string;
+    reasoning: string;
+    decidedBy: string;
+    linkedTaskId?: string;
+  }): Promise<Discussion> {
+    const db = this.getDb();
+    const now = nowIso();
+
+    const row = db.prepare("SELECT * FROM discussions WHERE id = ?").get(input.discussionId) as DiscussionRow | undefined;
+    if (!row) throw new Error(`Discussion not found: ${input.discussionId}`);
+
+    db.prepare(
+      `UPDATE discussions
+       SET status = 'resolved', decision = ?, decision_reasoning = ?, decided_by = ?,
+           linked_task_id = ?, waiting_on = NULL, resolved_at = ?, updated_at = ?
+       WHERE id = ?`
+    ).run(
+      input.decision,
+      input.reasoning,
+      input.decidedBy,
+      input.linkedTaskId ?? null,
+      now,
+      now,
+      input.discussionId
+    );
+
+    const updated = db.prepare("SELECT * FROM discussions WHERE id = ?").get(input.discussionId) as DiscussionRow;
+    const discussion = this.parseDiscussion(updated);
+    await appendLog(this.logDir, "discussion_resolve", { discussion });
+    return discussion;
+  }
+
+  async getDiscussion(id: string): Promise<{ discussion: Discussion; messages: DiscussionMessage[] } | null> {
+    const db = this.getDb();
+    const row = db.prepare("SELECT * FROM discussions WHERE id = ?").get(id) as DiscussionRow | undefined;
+    if (!row) return null;
+
+    const msgRows = db.prepare("SELECT * FROM discussion_messages WHERE discussion_id = ? ORDER BY created_at ASC")
+      .all(id) as DiscussionMessageRow[];
+
+    return {
+      discussion: this.parseDiscussion(row),
+      messages: msgRows.map((r) => this.parseDiscussionMessage(r)),
+    };
+  }
+
+  async listDiscussions(filters?: {
+    status?: DiscussionStatus;
+    category?: DiscussionCategory;
+    projectRoot?: string;
+    waitingOn?: string;
+    limit?: number;
+  }): Promise<Discussion[]> {
+    const db = this.getDb();
+    const where: string[] = [];
+    const params: string[] = [];
+
+    if (filters?.status) {
+      where.push("status = ?");
+      params.push(filters.status);
+    }
+    if (filters?.category) {
+      where.push("category = ?");
+      params.push(filters.category);
+    }
+    if (filters?.projectRoot) {
+      where.push("project_root = ?");
+      params.push(filters.projectRoot);
+    }
+    if (filters?.waitingOn) {
+      where.push("waiting_on = ?");
+      params.push(filters.waitingOn);
+    }
+
+    let sql = `SELECT * FROM discussions${where.length ? ` WHERE ${where.join(" AND ")}` : ""} ORDER BY
+      CASE priority WHEN 'blocking' THEN 1 WHEN 'high' THEN 2 WHEN 'medium' THEN 3 ELSE 4 END,
+      created_at DESC`;
+
+    if (filters?.limit && filters.limit > 0) {
+      sql += ` LIMIT ${filters.limit}`;
+    }
+
+    const rows = db.prepare(sql).all(...params) as DiscussionRow[];
+    return rows.map((row) => this.parseDiscussion(row));
+  }
+
+  async archiveDiscussion(id: string): Promise<Discussion> {
+    const db = this.getDb();
+    const now = nowIso();
+
+    const row = db.prepare("SELECT * FROM discussions WHERE id = ?").get(id) as DiscussionRow | undefined;
+    if (!row) throw new Error(`Discussion not found: ${id}`);
+
+    db.prepare(
+      `UPDATE discussions SET status = 'archived', archived_at = ?, updated_at = ? WHERE id = ?`
+    ).run(now, now, id);
+
+    const updated = db.prepare("SELECT * FROM discussions WHERE id = ?").get(id) as DiscussionRow;
+    const discussion = this.parseDiscussion(updated);
+    await appendLog(this.logDir, "discussion_archive", { discussion });
+    return discussion;
+  }
+
+  async archiveOldDiscussions(options: {
+    olderThanDays?: number;
+    projectRoot?: string;
+  }): Promise<number> {
+    const db = this.getDb();
+    const days = options.olderThanDays ?? 7;
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+    const now = nowIso();
+
+    let sql = `UPDATE discussions SET status = 'archived', archived_at = ?, updated_at = ?
+               WHERE status = 'resolved' AND resolved_at < ?`;
+    const params: string[] = [now, now, cutoff];
+
+    if (options.projectRoot) {
+      sql += " AND project_root = ?";
+      params.push(options.projectRoot);
+    }
+
+    const result = db.prepare(sql).run(...params);
+    await appendLog(this.logDir, "discussions_bulk_archive", { count: result.changes, olderThanDays: days });
+    return result.changes;
+  }
+
+  async deleteArchivedDiscussions(options: {
+    olderThanDays?: number;
+    projectRoot?: string;
+  }): Promise<number> {
+    const db = this.getDb();
+    const days = options.olderThanDays ?? 30;
+    const cutoff = new Date(Date.now() - days * 24 * 60 * 60 * 1000).toISOString();
+
+    // First get IDs to delete
+    let selectSql = `SELECT id FROM discussions WHERE status = 'archived' AND archived_at < ?`;
+    const selectParams: string[] = [cutoff];
+    if (options.projectRoot) {
+      selectSql += " AND project_root = ?";
+      selectParams.push(options.projectRoot);
+    }
+
+    const ids = db.prepare(selectSql).all(...selectParams) as { id: string }[];
+    if (ids.length === 0) return 0;
+
+    const idList = ids.map((r) => r.id);
+
+    // Delete messages first (foreign key)
+    const placeholders = idList.map(() => "?").join(",");
+    db.prepare(`DELETE FROM discussion_messages WHERE discussion_id IN (${placeholders})`).run(...idList);
+
+    // Delete discussions
+    const result = db.prepare(`DELETE FROM discussions WHERE id IN (${placeholders})`).run(...idList);
+
+    await appendLog(this.logDir, "discussions_bulk_delete", { count: result.changes, olderThanDays: days });
+    return result.changes;
   }
 }
 

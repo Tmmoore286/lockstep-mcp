@@ -175,24 +175,34 @@ const DASHBOARD_HTML = `<!doctype html>
 
     <section class="stats">
       <div class="stat">
+        <div class="label">Project Status</div>
+        <div class="value" id="project-status">--</div>
+      </div>
+      <div class="stat">
         <div class="label">Tasks</div>
         <div class="value" id="task-count">0</div>
+      </div>
+      <div class="stat">
+        <div class="label">Implementers</div>
+        <div class="value" id="implementer-count">0</div>
       </div>
       <div class="stat">
         <div class="label">Locks</div>
         <div class="value" id="lock-count">0</div>
       </div>
-      <div class="stat">
-        <div class="label">Notes</div>
-        <div class="value" id="note-count">0</div>
-      </div>
-      <div class="stat">
-        <div class="label">Storage</div>
-        <div class="value" id="storage">sqlite</div>
-      </div>
     </section>
 
     <section class="grid">
+      <div class="panel">
+        <h2>Project Context</h2>
+        <div id="project-context" class="list">
+          <div class="empty">No project context set.</div>
+        </div>
+      </div>
+      <div class="panel">
+        <h2>Implementers <span class="pill" id="impl-meta">0 active</span></h2>
+        <div class="list" id="implementer-list"></div>
+      </div>
       <div class="panel">
         <h2>Tasks <span class="pill" id="task-meta">0 total</span></h2>
         <div class="list" id="task-list"></div>
@@ -201,7 +211,7 @@ const DASHBOARD_HTML = `<!doctype html>
         <h2>Locks <span class="pill" id="lock-meta">0 active</span></h2>
         <div class="list" id="lock-list"></div>
       </div>
-      <div class="panel">
+      <div class="panel" style="grid-column: span 2;">
         <h2>Notes</h2>
         <div class="list" id="note-list"></div>
       </div>
@@ -213,15 +223,18 @@ const DASHBOARD_HTML = `<!doctype html>
 
     <script>
       const statusEl = document.getElementById("status");
+      const projectStatusEl = document.getElementById("project-status");
+      const projectContextEl = document.getElementById("project-context");
+      const implementerList = document.getElementById("implementer-list");
       const taskList = document.getElementById("task-list");
       const lockList = document.getElementById("lock-list");
       const noteList = document.getElementById("note-list");
       const taskCount = document.getElementById("task-count");
+      const implementerCount = document.getElementById("implementer-count");
       const lockCount = document.getElementById("lock-count");
-      const noteCount = document.getElementById("note-count");
-      const storageEl = document.getElementById("storage");
       const taskMeta = document.getElementById("task-meta");
       const lockMeta = document.getElementById("lock-meta");
+      const implMeta = document.getElementById("impl-meta");
 
       function escapeHtml(text) {
         return text.replace(/[&<>\"']/g, (char) => ({
@@ -285,11 +298,14 @@ const DASHBOARD_HTML = `<!doctype html>
           noteList.innerHTML = '<div class="empty">No notes yet.</div>';
           return;
         }
-        notes.forEach(note => {
+        // Show newest first
+        const sorted = [...notes].reverse();
+        sorted.forEach(note => {
           const card = document.createElement("div");
           card.className = "card";
+          const isSystem = note.author === "system";
           card.innerHTML =
-            '<div class="card-title">' +
+            '<div class="card-title"' + (isSystem ? ' style="color: var(--accent-2)"' : '') + '>' +
             (note.author ? escapeHtml(note.author) : "Anonymous") +
             "</div>" +
             '<div class="card-meta">' +
@@ -300,14 +316,77 @@ const DASHBOARD_HTML = `<!doctype html>
         });
       }
 
-      function updateState(state, config) {
+      function renderProjectContext(context) {
+        if (!context) {
+          projectContextEl.innerHTML = '<div class="empty">No project context set.</div>';
+          projectStatusEl.textContent = "--";
+          return;
+        }
+        projectStatusEl.textContent = context.status || "planning";
+        projectStatusEl.style.color =
+          context.status === "complete" ? "var(--accent-2)" :
+          context.status === "stopped" ? "#c44" :
+          context.status === "in_progress" ? "var(--accent)" : "var(--ink)";
+
+        let html = '<div class="card">';
+        html += '<div class="card-title">' + escapeHtml(context.description || "No description") + '</div>';
+        html += '<div class="card-meta"><strong>End State:</strong> ' + escapeHtml(context.endState || "Not defined") + '</div>';
+
+        if (context.techStack && context.techStack.length) {
+          html += '<div class="card-meta"><strong>Tech:</strong> ' + context.techStack.map(escapeHtml).join(", ") + '</div>';
+        }
+        if (context.acceptanceCriteria && context.acceptanceCriteria.length) {
+          html += '<div class="card-meta"><strong>Acceptance:</strong> ' + context.acceptanceCriteria.map(escapeHtml).join("; ") + '</div>';
+        }
+        if (context.implementationPlan && context.implementationPlan.length) {
+          html += '<div class="card-meta"><strong>Plan:</strong> ' + context.implementationPlan.length + ' steps</div>';
+        }
+        if (context.preferredImplementer) {
+          html += '<div class="card-meta mono">Implementer type: ' + context.preferredImplementer + '</div>';
+        }
+        html += '</div>';
+        projectContextEl.innerHTML = html;
+      }
+
+      function renderImplementers(implementers) {
+        implementerList.innerHTML = "";
+        if (!implementers || !implementers.length) {
+          implementerList.innerHTML = '<div class="empty">No implementers launched.</div>';
+          return;
+        }
+        implementers.forEach(impl => {
+          const card = document.createElement("div");
+          card.className = "card";
+          const isActive = impl.status === "active";
+          card.innerHTML =
+            '<div class="card-title"' + (isActive ? ' style="color: var(--accent-2)"' : ' style="color: var(--muted)"') + '>' +
+            escapeHtml(impl.name) + " (" + impl.type + ")" +
+            "</div>" +
+            '<div class="card-meta mono">' +
+            impl.status +
+            "</div>" +
+            '<div class="card-meta mono">started: ' + impl.createdAt + "</div>";
+          implementerList.appendChild(card);
+        });
+      }
+
+      function updateState(state, config, projectContext, implementers) {
         taskCount.textContent = state.tasks.length;
         lockCount.textContent = state.locks.length;
-        noteCount.textContent = state.notes.length;
-        storageEl.textContent = config?.storage || "sqlite";
-        taskMeta.textContent = state.tasks.length + " total";
+        const activeImpls = (implementers || []).filter(i => i.status === "active").length;
+        implementerCount.textContent = activeImpls;
+
+        const todoTasks = state.tasks.filter(t => t.status === "todo").length;
+        const inProgressTasks = state.tasks.filter(t => t.status === "in_progress").length;
+        const doneTasks = state.tasks.filter(t => t.status === "done").length;
+        taskMeta.textContent = todoTasks + " todo / " + inProgressTasks + " active / " + doneTasks + " done";
+
         const activeLocks = state.locks.filter(lock => lock.status === "active").length;
         lockMeta.textContent = activeLocks + " active";
+        implMeta.textContent = activeImpls + " active";
+
+        renderProjectContext(projectContext);
+        renderImplementers(implementers);
         renderTasks(state.tasks);
         renderLocks(state.locks);
         renderNotes(state.notes);
@@ -316,7 +395,7 @@ const DASHBOARD_HTML = `<!doctype html>
       async function fetchState() {
         const response = await fetch("/api/state");
         const data = await response.json();
-        updateState(data.state, data.config);
+        updateState(data.state, data.config, data.projectContext, data.implementers);
       }
 
       function connect() {
@@ -324,13 +403,13 @@ const DASHBOARD_HTML = `<!doctype html>
         const socket = new WebSocket(protocol + "://" + window.location.host + "/ws");
 
         socket.addEventListener("open", () => {
-          statusEl.textContent = "Connected";
+          statusEl.textContent = "Connected - live updates";
         });
 
         socket.addEventListener("message", (event) => {
           const payload = JSON.parse(event.data);
           if (payload.type === "snapshot" || payload.type === "state") {
-            updateState(payload.state, payload.config);
+            updateState(payload.state, payload.config, payload.projectContext, payload.implementers);
           }
         });
 
@@ -366,8 +445,13 @@ export async function startDashboard(options: DashboardOptions = {}) {
     const parsed = url.parse(req.url || "");
     if (parsed.pathname === "/api/state") {
       const state = await store.status();
+      const projectRoot = config.roots[0] ?? process.cwd();
+      const projectContext = await store.getProjectContext(projectRoot);
+      const implementers = await store.listImplementers(projectRoot);
       const payload = {
         state,
+        projectContext,
+        implementers,
         config: {
           mode: config.mode,
           storage: config.storage,
@@ -396,11 +480,17 @@ export async function startDashboard(options: DashboardOptions = {}) {
     }
   };
 
+  const projectRoot = config.roots[0] ?? process.cwd();
+
   const sendSnapshot = async () => {
     const state = await store.status();
+    const projectContext = await store.getProjectContext(projectRoot);
+    const implementers = await store.listImplementers(projectRoot);
     broadcast({
       type: "snapshot",
       state,
+      projectContext,
+      implementers,
       config: {
         mode: config.mode,
         storage: config.storage,
@@ -415,15 +505,19 @@ export async function startDashboard(options: DashboardOptions = {}) {
     sendSnapshot().catch(() => undefined);
   });
 
-  let lastState = "";
+  let lastHash = "";
   const poll = async () => {
     const state = await store.status();
-    const next = JSON.stringify(state);
-    if (next !== lastState) {
-      lastState = next;
+    const projectContext = await store.getProjectContext(projectRoot);
+    const implementers = await store.listImplementers(projectRoot);
+    const next = JSON.stringify({ state, projectContext, implementers });
+    if (next !== lastHash) {
+      lastHash = next;
       broadcast({
         type: "state",
         state,
+        projectContext,
+        implementers,
         config: {
           mode: config.mode,
           storage: config.storage,

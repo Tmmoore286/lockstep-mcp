@@ -190,18 +190,19 @@ const tools = [
   },
   {
     name: "task_create",
-    description: "Create a task",
+    description: "Create a task. Complexity determines review requirements: simple=no review, medium=verify on completion, complex/critical=planner approval required",
     inputSchema: {
       type: "object",
       properties: {
         title: { type: "string" },
         description: { type: "string" },
-        status: { type: "string", enum: ["todo", "in_progress", "blocked", "done"] },
+        status: { type: "string", enum: ["todo", "in_progress", "blocked", "review", "done"] },
+        complexity: { type: "string", enum: ["simple", "medium", "complex", "critical"], description: "simple=1-2 files obvious fix, medium=3-5 files some ambiguity, complex=6+ files architectural decisions, critical=database/security/cross-product" },
         owner: { type: "string" },
         tags: { type: "array", items: { type: "string" } },
         metadata: { type: "object" },
       },
-      required: ["title"],
+      required: ["title", "complexity"],
       additionalProperties: false,
     },
   },
@@ -227,7 +228,8 @@ const tools = [
         id: { type: "string" },
         title: { type: "string" },
         description: { type: "string" },
-        status: { type: "string", enum: ["todo", "in_progress", "blocked", "done"] },
+        status: { type: "string", enum: ["todo", "in_progress", "blocked", "review", "done"] },
+        complexity: { type: "string", enum: ["simple", "medium", "complex", "critical"] },
         owner: { type: "string" },
         tags: { type: "array", items: { type: "string" } },
         metadata: { type: "object" },
@@ -237,12 +239,52 @@ const tools = [
     },
   },
   {
+    name: "task_submit_for_review",
+    description: "Submit a completed task for planner review (required for complex/critical tasks, recommended for medium)",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Task ID" },
+        owner: { type: "string", description: "Your implementer name" },
+        reviewNotes: { type: "string", description: "Summary of changes made, files modified, and any concerns or decisions made" },
+      },
+      required: ["id", "owner", "reviewNotes"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "task_approve",
+    description: "PLANNER ONLY: Approve a task that is in review status, marking it done",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Task ID" },
+        feedback: { type: "string", description: "Optional feedback or notes on the approved work" },
+      },
+      required: ["id"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "task_request_changes",
+    description: "PLANNER ONLY: Request changes on a task in review, sending it back to in_progress",
+    inputSchema: {
+      type: "object",
+      properties: {
+        id: { type: "string", description: "Task ID" },
+        feedback: { type: "string", description: "What needs to be changed or fixed" },
+      },
+      required: ["id", "feedback"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "task_list",
     description: "List tasks with optional filters",
     inputSchema: {
       type: "object",
       properties: {
-        status: { type: "string", enum: ["todo", "in_progress", "blocked", "done"] },
+        status: { type: "string", enum: ["todo", "in_progress", "blocked", "review", "done"] },
         owner: { type: "string" },
         tag: { type: "string" },
         limit: { type: "number" },
@@ -655,11 +697,14 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       }
       case "task_create": {
         const title = getString(args.title);
+        const complexity = getString(args.complexity) as "simple" | "medium" | "complex" | "critical" | undefined;
         if (!title) throw new Error("title is required");
+        if (!complexity) throw new Error("complexity is required (simple/medium/complex/critical)");
         const task = await store.createTask({
           title,
           description: getString(args.description),
-          status: getString(args.status) as "todo" | "in_progress" | "blocked" | "done" | undefined,
+          status: getString(args.status) as "todo" | "in_progress" | "blocked" | "review" | "done" | undefined,
+          complexity,
           owner: getString(args.owner),
           tags: getStringArray(args.tags),
           metadata: getObject(args.metadata),
@@ -671,17 +716,30 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const owner = getString(args.owner);
         if (!id || !owner) throw new Error("id and owner are required");
         const task = await store.claimTask({ id, owner });
-        return jsonResponse(task);
+
+        // Return complexity-based instructions
+        const complexityInstructions: Record<string, string> = {
+          simple: "Simple task - implement and mark done directly.",
+          medium: "Medium task - implement carefully, submit_for_review when complete.",
+          complex: "Complex task - discuss approach first if unclear, get planner approval via submit_for_review.",
+          critical: "CRITICAL task - discuss approach with planner BEFORE starting, get approval at each step."
+        };
+
+        return jsonResponse({
+          ...task,
+          _instruction: complexityInstructions[task.complexity] ?? complexityInstructions.medium
+        });
       }
       case "task_update": {
         const id = getString(args.id);
         if (!id) throw new Error("id is required");
-        const newStatus = getString(args.status) as "todo" | "in_progress" | "blocked" | "done" | undefined;
+        const newStatus = getString(args.status) as "todo" | "in_progress" | "blocked" | "review" | "done" | undefined;
         const task = await store.updateTask({
           id,
           title: getString(args.title),
           description: getString(args.description),
           status: newStatus,
+          complexity: getString(args.complexity) as "simple" | "medium" | "complex" | "critical" | undefined,
           owner: getString(args.owner),
           tags: getStringArray(args.tags),
           metadata: getObject(args.metadata),
@@ -691,7 +749,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         if (newStatus === "done") {
           const todoTasks = await store.listTasks({ status: "todo" });
           const inProgressTasks = await store.listTasks({ status: "in_progress" });
-          if (todoTasks.length === 0 && inProgressTasks.length === 0) {
+          const reviewTasks = await store.listTasks({ status: "review" });
+          if (todoTasks.length === 0 && inProgressTasks.length === 0 && reviewTasks.length === 0) {
             // All tasks complete - notify planner
             await store.appendNote({
               text: "[SYSTEM] ALL TASKS COMPLETE! Planner: review the work and call project_status_set({ status: 'complete' }) if satisfied, or create more tasks.",
@@ -702,9 +761,71 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
         return jsonResponse(task);
       }
+      case "task_submit_for_review": {
+        const id = getString(args.id);
+        const owner = getString(args.owner);
+        const reviewNotes = getString(args.reviewNotes);
+        if (!id || !owner || !reviewNotes) {
+          throw new Error("id, owner, and reviewNotes are required");
+        }
+        const task = await store.submitTaskForReview({ id, owner, reviewNotes });
+
+        // Notify planner
+        await store.appendNote({
+          text: `[REVIEW] Task "${task.title}" submitted for review by ${owner}. Planner: use task_approve or task_request_changes.`,
+          author: "system"
+        });
+
+        return jsonResponse({
+          ...task,
+          _instruction: "Task submitted for planner review. Continue with other tasks while waiting."
+        });
+      }
+      case "task_approve": {
+        const id = getString(args.id);
+        if (!id) throw new Error("id is required");
+        const feedback = getString(args.feedback);
+        const task = await store.approveTask({ id, feedback });
+
+        // Notify implementer
+        await store.appendNote({
+          text: `[APPROVED] Task "${task.title}" approved by planner.${feedback ? ` Feedback: ${feedback}` : ""}`,
+          author: "system"
+        });
+
+        // Check if all tasks are now complete
+        const todoTasks = await store.listTasks({ status: "todo" });
+        const inProgressTasks = await store.listTasks({ status: "in_progress" });
+        const reviewTasks = await store.listTasks({ status: "review" });
+        if (todoTasks.length === 0 && inProgressTasks.length === 0 && reviewTasks.length === 0) {
+          await store.appendNote({
+            text: "[SYSTEM] ALL TASKS COMPLETE! Planner: review the work and call project_status_set({ status: 'complete' }) if satisfied, or create more tasks.",
+            author: "system"
+          });
+        }
+
+        return jsonResponse(task);
+      }
+      case "task_request_changes": {
+        const id = getString(args.id);
+        const feedback = getString(args.feedback);
+        if (!id || !feedback) throw new Error("id and feedback are required");
+        const task = await store.requestTaskChanges({ id, feedback });
+
+        // Notify implementer
+        await store.appendNote({
+          text: `[CHANGES REQUESTED] Task "${task.title}" needs changes: ${feedback}`,
+          author: "system"
+        });
+
+        return jsonResponse({
+          ...task,
+          _instruction: `Changes requested by planner: ${feedback}. Task returned to in_progress.`
+        });
+      }
       case "task_list": {
         const tasks = await store.listTasks({
-          status: getString(args.status) as "todo" | "in_progress" | "blocked" | "done" | undefined,
+          status: getString(args.status) as "todo" | "in_progress" | "blocked" | "review" | "done" | undefined,
           owner: getString(args.owner),
           tag: getString(args.tag),
           limit: getNumber(args.limit),

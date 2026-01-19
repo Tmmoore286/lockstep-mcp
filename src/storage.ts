@@ -5,7 +5,8 @@ import Database from "better-sqlite3";
 import { ensureDir, sleep } from "./utils.js";
 import type { Config } from "./config.js";
 
-export type TaskStatus = "todo" | "in_progress" | "blocked" | "done";
+export type TaskStatus = "todo" | "in_progress" | "blocked" | "review" | "done";
+export type TaskComplexity = "simple" | "medium" | "complex" | "critical";
 export type LockStatus = "active" | "resolved";
 
 export type Task = {
@@ -13,9 +14,14 @@ export type Task = {
   title: string;
   description?: string;
   status: TaskStatus;
+  complexity: TaskComplexity;
   owner?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
+  // Review workflow fields
+  reviewNotes?: string;        // Notes from implementer when submitting for review
+  reviewFeedback?: string;     // Feedback from planner after review
+  reviewRequestedAt?: string;  // When review was requested
   createdAt: string;
   updatedAt: string;
 };
@@ -110,6 +116,7 @@ export interface Store {
     title: string;
     description?: string;
     status?: TaskStatus;
+    complexity?: TaskComplexity;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
@@ -119,9 +126,26 @@ export interface Store {
     title?: string;
     description?: string;
     status?: TaskStatus;
+    complexity?: TaskComplexity;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
+    reviewNotes?: string;
+    reviewFeedback?: string;
+    reviewRequestedAt?: string;
+  }): Promise<Task>;
+  submitTaskForReview(input: {
+    id: string;
+    owner: string;
+    reviewNotes: string;
+  }): Promise<Task>;
+  approveTask(input: {
+    id: string;
+    feedback?: string;
+  }): Promise<Task>;
+  requestTaskChanges(input: {
+    id: string;
+    feedback: string;
   }): Promise<Task>;
   claimTask(input: { id: string; owner: string }): Promise<Task>;
   listTasks(filters?: {
@@ -291,6 +315,7 @@ export class JsonStore implements Store {
     title: string;
     description?: string;
     status?: TaskStatus;
+    complexity?: TaskComplexity;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
@@ -302,6 +327,7 @@ export class JsonStore implements Store {
         title: input.title,
         description: input.description,
         status: input.status ?? "todo",
+        complexity: input.complexity ?? "medium",
         owner: input.owner,
         tags: input.tags,
         metadata: input.metadata,
@@ -343,6 +369,17 @@ export class JsonStore implements Store {
 
   async claimTask(input: { id: string; owner: string }): Promise<Task> {
     return this.updateTask({ id: input.id, owner: input.owner, status: "in_progress" });
+  }
+
+  // Review workflow methods - not fully implemented for JSON storage
+  async submitTaskForReview(): Promise<Task> {
+    throw new Error("Review workflow requires SQLite storage. Set storage: 'sqlite' in config.");
+  }
+  async approveTask(): Promise<Task> {
+    throw new Error("Review workflow requires SQLite storage.");
+  }
+  async requestTaskChanges(): Promise<Task> {
+    throw new Error("Review workflow requires SQLite storage.");
   }
 
   async listTasks(filters?: {
@@ -597,9 +634,13 @@ type TaskRow = {
   title: string;
   description: string | null;
   status: TaskStatus;
+  complexity: TaskComplexity;
   owner: string | null;
   tags: string | null;
   metadata: string | null;
+  review_notes: string | null;
+  review_feedback: string | null;
+  review_requested_at: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -690,9 +731,13 @@ export class SqliteStore implements Store {
         title TEXT NOT NULL,
         description TEXT,
         status TEXT NOT NULL,
+        complexity TEXT NOT NULL DEFAULT 'medium',
         owner TEXT,
         tags TEXT,
         metadata TEXT,
+        review_notes TEXT,
+        review_feedback TEXT,
+        review_requested_at TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -788,6 +833,19 @@ export class SqliteStore implements Store {
     try {
       this.db.exec("ALTER TABLE project_contexts ADD COLUMN status TEXT NOT NULL DEFAULT 'planning'");
     } catch { /* column exists */ }
+    // Task review workflow columns
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN complexity TEXT NOT NULL DEFAULT 'medium'");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN review_notes TEXT");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN review_feedback TEXT");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN review_requested_at TEXT");
+    } catch { /* column exists */ }
   }
 
   private getDb(): Database.Database {
@@ -801,9 +859,13 @@ export class SqliteStore implements Store {
       title: row.title,
       description: row.description ?? undefined,
       status: row.status,
+      complexity: row.complexity ?? "medium",
       owner: row.owner ?? undefined,
       tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
       metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
+      reviewNotes: row.review_notes ?? undefined,
+      reviewFeedback: row.review_feedback ?? undefined,
+      reviewRequestedAt: row.review_requested_at ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -845,6 +907,7 @@ export class SqliteStore implements Store {
     title: string;
     description?: string;
     status?: TaskStatus;
+    complexity?: TaskComplexity;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
@@ -855,6 +918,7 @@ export class SqliteStore implements Store {
       title: input.title,
       description: input.description,
       status: input.status ?? "todo",
+      complexity: input.complexity ?? "medium",
       owner: input.owner,
       tags: input.tags,
       metadata: input.metadata,
@@ -863,13 +927,14 @@ export class SqliteStore implements Store {
     };
 
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, owner, tags, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, title, description, status, complexity, owner, tags, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       task.id,
       task.title,
       task.description ?? null,
       task.status,
+      task.complexity,
       task.owner ?? null,
       task.tags ? JSON.stringify(task.tags) : null,
       task.metadata ? JSON.stringify(task.metadata) : null,
@@ -886,9 +951,13 @@ export class SqliteStore implements Store {
     title?: string;
     description?: string;
     status?: TaskStatus;
+    complexity?: TaskComplexity;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
+    reviewNotes?: string;
+    reviewFeedback?: string;
+    reviewRequestedAt?: string;
   }): Promise<Task> {
     const db = this.getDb();
     const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(input.id) as TaskRow | undefined;
@@ -898,22 +967,31 @@ export class SqliteStore implements Store {
     if (input.title !== undefined) task.title = input.title;
     if (input.description !== undefined) task.description = input.description;
     if (input.status !== undefined) task.status = input.status;
+    if (input.complexity !== undefined) task.complexity = input.complexity;
     if (input.owner !== undefined) task.owner = input.owner;
     if (input.tags !== undefined) task.tags = input.tags;
     if (input.metadata !== undefined) task.metadata = input.metadata;
+    if (input.reviewNotes !== undefined) task.reviewNotes = input.reviewNotes;
+    if (input.reviewFeedback !== undefined) task.reviewFeedback = input.reviewFeedback;
+    if (input.reviewRequestedAt !== undefined) task.reviewRequestedAt = input.reviewRequestedAt;
     task.updatedAt = nowIso();
 
     db.prepare(
       `UPDATE tasks
-       SET title = ?, description = ?, status = ?, owner = ?, tags = ?, metadata = ?, updated_at = ?
+       SET title = ?, description = ?, status = ?, complexity = ?, owner = ?, tags = ?, metadata = ?,
+           review_notes = ?, review_feedback = ?, review_requested_at = ?, updated_at = ?
        WHERE id = ?`
     ).run(
       task.title,
       task.description ?? null,
       task.status,
+      task.complexity,
       task.owner ?? null,
       task.tags ? JSON.stringify(task.tags) : null,
       task.metadata ? JSON.stringify(task.metadata) : null,
+      task.reviewNotes ?? null,
+      task.reviewFeedback ?? null,
+      task.reviewRequestedAt ?? null,
       task.updatedAt,
       task.id
     );
@@ -924,6 +1002,59 @@ export class SqliteStore implements Store {
 
   async claimTask(input: { id: string; owner: string }): Promise<Task> {
     return this.updateTask({ id: input.id, owner: input.owner, status: "in_progress" });
+  }
+
+  async submitTaskForReview(input: {
+    id: string;
+    owner: string;
+    reviewNotes: string;
+  }): Promise<Task> {
+    const db = this.getDb();
+    const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(input.id) as TaskRow | undefined;
+    if (!row) throw new Error(`Task not found: ${input.id}`);
+    if (row.owner !== input.owner) {
+      throw new Error(`Task owned by ${row.owner}, not ${input.owner}`);
+    }
+    return this.updateTask({
+      id: input.id,
+      status: "review",
+      reviewNotes: input.reviewNotes,
+      reviewRequestedAt: nowIso(),
+    });
+  }
+
+  async approveTask(input: {
+    id: string;
+    feedback?: string;
+  }): Promise<Task> {
+    const db = this.getDb();
+    const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(input.id) as TaskRow | undefined;
+    if (!row) throw new Error(`Task not found: ${input.id}`);
+    if (row.status !== "review") {
+      throw new Error(`Task is not in review status (current: ${row.status})`);
+    }
+    return this.updateTask({
+      id: input.id,
+      status: "done",
+      reviewFeedback: input.feedback ?? "Approved",
+    });
+  }
+
+  async requestTaskChanges(input: {
+    id: string;
+    feedback: string;
+  }): Promise<Task> {
+    const db = this.getDb();
+    const row = db.prepare("SELECT * FROM tasks WHERE id = ?").get(input.id) as TaskRow | undefined;
+    if (!row) throw new Error(`Task not found: ${input.id}`);
+    if (row.status !== "review") {
+      throw new Error(`Task is not in review status (current: ${row.status})`);
+    }
+    return this.updateTask({
+      id: input.id,
+      status: "in_progress",  // Send back to in_progress for rework
+      reviewFeedback: input.feedback,
+    });
   }
 
   async listTasks(filters?: {

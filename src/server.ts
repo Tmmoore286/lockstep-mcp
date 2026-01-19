@@ -9,10 +9,10 @@ import {
 } from "@modelcontextprotocol/sdk/types.js";
 import { loadConfig } from "./config.js";
 import { resolvePath, ensureDir } from "./utils.js";
-import { Store } from "./storage.js";
+import { createStore } from "./storage.js";
 
 const config = loadConfig();
-const store = new Store(config.dataDir, config.logDir);
+const store = createStore(config);
 
 function getString(value: unknown): string | undefined {
   return typeof value === "string" ? value : undefined;
@@ -439,6 +439,8 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
             roots: config.roots,
             dataDir: config.dataDir,
             logDir: config.logDir,
+            storage: config.storage,
+            dbPath: config.dbPath,
             command: config.command,
           },
           stateSummary: {

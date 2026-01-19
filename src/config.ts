@@ -3,6 +3,7 @@ import { expandHome, normalizeRoots } from "./utils.js";
 
 export type AccessMode = "open" | "strict";
 export type CommandMode = "open" | "allowlist";
+export type StorageBackend = "json" | "sqlite";
 
 export type CommandPolicy = {
   mode: CommandMode;
@@ -14,6 +15,8 @@ export type Config = {
   serverVersion: string;
   dataDir: string;
   logDir: string;
+  storage: StorageBackend;
+  dbPath: string;
   mode: AccessMode;
   roots: string[];
   command: CommandPolicy;
@@ -50,6 +53,13 @@ export function loadConfig(): Config {
     parseArgValue(args, "--data-dir") || process.env.COORD_DATA_DIR || "~/.lunara-mcp-coordinator/data";
   const logDirRaw =
     parseArgValue(args, "--log-dir") || process.env.COORD_LOG_DIR || "~/.lunara-mcp-coordinator/logs";
+  const dataDir = path.resolve(expandHome(dataDirRaw));
+  const logDir = path.resolve(expandHome(logDirRaw));
+
+  const storage =
+    (parseArgValue(args, "--storage") || process.env.COORD_STORAGE || "sqlite") as StorageBackend;
+  const dbPathRaw =
+    parseArgValue(args, "--db-path") || process.env.COORD_DB_PATH || path.join(dataDir, "coordinator.db");
 
   const commandMode =
     (parseArgValue(args, "--command-mode") ||
@@ -65,8 +75,10 @@ export function loadConfig(): Config {
   return {
     serverName,
     serverVersion,
-    dataDir: path.resolve(expandHome(dataDirRaw)),
-    logDir: path.resolve(expandHome(logDirRaw)),
+    dataDir,
+    logDir,
+    storage: storage === "json" ? "json" : "sqlite",
+    dbPath: path.resolve(expandHome(dbPathRaw)),
     mode: mode === "strict" ? "strict" : "open",
     roots,
     command: {

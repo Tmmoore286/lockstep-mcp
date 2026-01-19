@@ -7,6 +7,8 @@ export type InstallOptions = {
   name?: string;
   mode?: string;
   roots?: string;
+  storage?: string;
+  dbPath?: string;
   dataDir?: string;
   logDir?: string;
   commandMode?: string;
@@ -70,6 +72,12 @@ export function installMcpEntry(options: InstallOptions) {
   }
   if (options.logDir) {
     args.push("--log-dir", options.logDir);
+  }
+  if (options.storage) {
+    args.push("--storage", options.storage);
+  }
+  if (options.dbPath) {
+    args.push("--db-path", options.dbPath);
   }
   if (options.commandMode) {
     args.push("--command-mode", options.commandMode);

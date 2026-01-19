@@ -24,12 +24,12 @@ function printHelp() {
   const text = `lunara-mcp-coordinator
 
 Usage:
-  lunara-mcp-coordinator server [--mode open|strict] [--roots <paths>] [--data-dir <path>] [--log-dir <path>]
-  lunara-mcp-coordinator install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>]
+  lunara-mcp-coordinator server [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>] [--data-dir <path>] [--log-dir <path>]
+  lunara-mcp-coordinator install --config <path> [--name <server-name>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json] [--db-path <path>]
 
 Examples:
-  lunara-mcp-coordinator server --mode strict --roots /path/to/repo,/tmp
-  lunara-mcp-coordinator install --config ~/.codex/.mcp.json --mode strict --roots /path/to/repo,/tmp
+  lunara-mcp-coordinator server --mode strict --roots /path/to/repo,/tmp --storage sqlite
+  lunara-mcp-coordinator install --config ~/.codex/.mcp.json --mode strict --roots /path/to/repo,/tmp --storage sqlite
 `;
   process.stdout.write(text);
 }
@@ -49,6 +49,8 @@ async function main() {
       name: typeof args["--name"] === "string" ? args["--name"] : undefined,
       mode: typeof args["--mode"] === "string" ? args["--mode"] : undefined,
       roots: typeof args["--roots"] === "string" ? args["--roots"] : undefined,
+      storage: typeof args["--storage"] === "string" ? args["--storage"] : undefined,
+      dbPath: typeof args["--db-path"] === "string" ? args["--db-path"] : undefined,
       dataDir: typeof args["--data-dir"] === "string" ? args["--data-dir"] : undefined,
       logDir: typeof args["--log-dir"] === "string" ? args["--log-dir"] : undefined,
       commandMode: typeof args["--command-mode"] === "string" ? args["--command-mode"] : undefined,

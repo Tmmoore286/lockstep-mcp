@@ -69,6 +69,8 @@ All options can be provided by CLI flags or env vars.
 - `--roots /path/a,/path/b` (or `COORD_ROOTS`)
 - `--data-dir /path` (or `COORD_DATA_DIR`)
 - `--log-dir /path` (or `COORD_LOG_DIR`)
+- `--storage sqlite|json` (or `COORD_STORAGE`)
+- `--db-path /path/to/coordinator.db` (or `COORD_DB_PATH`)
 - `--command-mode open|allowlist` (or `COORD_COMMAND_MODE`)
 - `--command-allow cmd1,cmd2` (or `COORD_COMMAND_ALLOW`)
 
@@ -77,6 +79,8 @@ Defaults:
 - roots: `process.cwd()`
 - data dir: `~/.lunara-mcp-coordinator/data`
 - log dir: `~/.lunara-mcp-coordinator/logs`
+- storage: `sqlite`
+- db path: `<data-dir>/coordinator.db`
 - command mode: `open`
 
 ## Example .mcp.json
@@ -89,6 +93,8 @@ Defaults:
         "/absolute/path/to/lunara-mcp-coordinator/dist/server.js",
         "--mode",
         "strict",
+        "--storage",
+        "sqlite",
         "--roots",
         "/absolute/path/to/your/repo,/tmp"
       ]
@@ -109,6 +115,8 @@ Dev example (uses TS loader):
         "/absolute/path/to/lunara-mcp-coordinator/src/server.ts",
         "--mode",
         "strict",
+        "--storage",
+        "sqlite",
         "--roots",
         "/absolute/path/to/your/repo,/tmp"
       ]
@@ -119,11 +127,11 @@ Dev example (uses TS loader):
 
 ## Storage + dashboard options (recommendation)
 Short version:
-- JSON file (current): fastest to ship, easiest to inspect, fine for light coordination.
-- SQLite: best for many agents, heavier concurrency, and reliable atomic updates.
+- SQLite (default): best for many agents, heavier concurrency, and reliable atomic updates.
+- JSON file (optional): fastest to ship, easiest to inspect, fine for light coordination.
 - Web dashboard: add a small HTTP server + WebSocket/SSE to stream updates.
 
-When to stay on JSON:
+When to choose JSON:
 - 1–3 agents, low write volume, and you want simplicity.
 
 When to move to SQLite:

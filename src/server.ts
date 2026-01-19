@@ -941,8 +941,15 @@ DO NOT proceed to implementation without explicit user approval.`
               active: activeImplementers.length
             },
             instruction: tasks.length === 0 && inProgressTasks.length === 0
-              ? "All tasks complete! Review the work, run tests, and if satisfied, call project_status_set with status 'complete'. Otherwise create more tasks."
-              : `Monitor progress via task_list and note_list. Use note_append to communicate with implementers. Use launch_implementer with type="${implType}" to add more workers if needed. When all work is done, set project status to 'complete'. To stop all work, set status to 'stopped'.`
+              ? "All tasks complete! Ask the user to verify the work. If satisfied, call project_status_set with status 'complete'. Otherwise create more tasks."
+              : `IMPORTANT: You are the PLANNER - do NOT write code or run builds yourself. Your job is to:
+1. Monitor progress via task_list and note_list
+2. Communicate with implementers via note_append
+3. Launch more implementers if needed: launch_implementer with type="${implType}"
+4. Answer implementer questions via discussions
+5. When all work is done, set project status to 'complete'
+
+If no implementers are active, launch one NOW with launch_implementer.`
           });
         } else {
           // IMPLEMENTER ROLE

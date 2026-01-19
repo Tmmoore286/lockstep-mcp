@@ -1,24 +1,47 @@
 # Lockstep MCP
 
-Local MCP server for coordinating multiple agents (tasks, locks, notes, file ops, command exec).
+Lockstep MCP is a lightweight coordination server for multi‑agent workflows. It gives agents shared state (tasks, locks, notes), safe file access, and controlled command execution so two or more agents can collaborate without stepping on each other.
+
+If you are evaluating this repo: it is designed to be clear, practical, and production‑minded. Everything is local‑first, explicit about safety boundaries, and easy to extend.
+
+## Table of contents
+- Features
+- Architecture
+- Install
+- Quick start
+- Collaboration walkthrough
+- Configuration
+- Example `.mcp.json`
+- Storage + dashboard options
+- Tools
+- License
 
 ## Features
 - Task and lock registry (shared across agents)
 - Notes + JSONL event log
 - File read/write with optional strict root mapping
 - Command execution (open or allowlist)
+- SQLite storage by default (JSON optional)
+
+## Architecture
+The coordinator is a local MCP server with three core layers:
+- MCP transport (stdio) for tool calls
+- Storage layer (SQLite by default, JSON optional)
+- Guardrails (root‑scoped file access + optional command allowlist)
+
+This design keeps the API surface small while supporting safe autonomy.
 
 ## Install
 From GitHub:
 ```bash
-git clone <repo-url>
+git clone https://github.com/Tmmoore286/lockstep-mcp.git
 cd lockstep-mcp
 npm install
 ```
 
 Global install (optional):
 ```bash
-npm install -g <repo-url>
+npm install -g https://github.com/Tmmoore286/lockstep-mcp.git
 ```
 
 ## Agent self-install (Codex/Claude)
@@ -62,8 +85,8 @@ To run in the background:
 nohup npm run dev -- --mode strict --roots /absolute/path/to/your/repo,/tmp > /tmp/lockstep-mcp.log 2>&1 &
 ```
 
-## Two agents collaborating (plain language)
-This is how you run Claude and Codex together using the same coordinator state.
+## Collaboration walkthrough (plain language)
+This is how you run two agents together using the same coordinator state.
 
 1) Make sure both tools use the same coordinator config
 - Both clients must point to the same MCP entry and same SQLite database (`--storage sqlite` and the same `--db-path` or `--data-dir`).
@@ -196,3 +219,6 @@ If you want, I can add:
 - File operations are restricted to `roots` when `mode=strict`.
 - Command allowlist is enforced when `command-mode=allowlist`.
 - Event log is written to `logs/events.jsonl`.
+
+## License
+MIT. See `LICENSE`.

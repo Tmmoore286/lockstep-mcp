@@ -479,7 +479,12 @@ export async function startDashboard(options: DashboardOptions = {}) {
           logDir: config.logDir,
         },
       };
-      res.writeHead(200, { "Content-Type": "application/json" });
+      res.writeHead(200, {
+        "Content-Type": "application/json",
+        "Cache-Control": "no-cache, no-store, must-revalidate",
+        "Pragma": "no-cache",
+        "Expires": "0"
+      });
       res.end(JSON.stringify(payload));
       return;
     }

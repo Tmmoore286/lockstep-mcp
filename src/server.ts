@@ -1096,8 +1096,8 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
         const existingImplementers = await store.listImplementers(projectRoot);
         const isFirstImplementer = existingImplementers.filter(i => i.status === "active").length === 0;
 
-        // Determine the command to run
-        const cmd = type === "claude" ? "claude" : "codex";
+        // Determine the command to run (codex uses --full-auto for autonomous work)
+        const cmd = type === "claude" ? "claude" : "codex --full-auto";
 
         // Build the prompt that will be injected
         const prompt = `You are the implementer named "${name}". Initialize with: coordination_init({ role: "implementer" }). Then continuously work on tasks until the project status is "stopped" or "complete".`;

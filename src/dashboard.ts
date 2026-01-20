@@ -351,6 +351,33 @@ const DASHBOARD_HTML = `<!doctype html>
       .tag.shared { background: var(--bg-hover); color: var(--text-muted); }
       .tag.branch { background: var(--violet-glow); color: var(--violet); font-size: 9px; }
 
+      /* Implementer task summary */
+      .impl-tasks {
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+      }
+      .impl-task {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        margin-bottom: 4px;
+      }
+      .impl-task:last-child { margin-bottom: 0; }
+      .impl-task .task-title {
+        color: var(--text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        flex: 1;
+      }
+      .impl-task-summary {
+        font-size: 10px;
+        color: var(--text-muted);
+        margin-top: 4px;
+      }
+
       /* Clickable implementer cards */
       .card.clickable {
         cursor: pointer;
@@ -714,12 +741,13 @@ const DASHBOARD_HTML = `<!doctype html>
         }
       }
 
-      function renderImplementers(implementers) {
+      function renderImplementers(implementers, tasks) {
         implementerList.innerHTML = "";
         if (!implementers || !implementers.length) {
           implementerList.innerHTML = '<div class="empty">No implementers launched</div>';
           return;
         }
+        tasks = tasks || [];
         implementers.forEach(impl => {
           const card = document.createElement("div");
           const isActive = impl.status === "active";
@@ -735,6 +763,41 @@ const DASHBOARD_HTML = `<!doctype html>
             isolationHtml = '<span class="tag ' + impl.isolation + '">' + impl.isolation + '</span>';
           }
 
+          // Get tasks for this implementer
+          const implTasks = tasks.filter(t => t.owner === impl.name);
+          const currentTask = implTasks.find(t => t.status === "in_progress");
+          const reviewTasks = implTasks.filter(t => t.status === "review");
+          const doneTasks = implTasks.filter(t => t.status === "done");
+
+          // Build task summary HTML
+          let tasksHtml = '';
+          if (implTasks.length > 0) {
+            tasksHtml = '<div class="impl-tasks">';
+            if (currentTask) {
+              tasksHtml += '<div class="impl-task">' +
+                '<span class="tag in_progress">working</span>' +
+                '<span class="task-title">' + escapeHtml(currentTask.title) + '</span>' +
+                '</div>';
+            }
+            reviewTasks.forEach(t => {
+              tasksHtml += '<div class="impl-task">' +
+                '<span class="tag review">review</span>' +
+                '<span class="task-title">' + escapeHtml(t.title) + '</span>' +
+                '</div>';
+            });
+            if (doneTasks.length > 0 && !currentTask && reviewTasks.length === 0) {
+              // Show most recent done task if no active work
+              const recentDone = doneTasks.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+              tasksHtml += '<div class="impl-task">' +
+                '<span class="tag done">done</span>' +
+                '<span class="task-title">' + escapeHtml(recentDone.title) + '</span>' +
+                '</div>';
+            }
+            tasksHtml += '<div class="impl-task-summary">' + doneTasks.length + ' completed, ' +
+              (implTasks.length - doneTasks.length) + ' remaining</div>';
+            tasksHtml += '</div>';
+          }
+
           card.innerHTML =
             '<div class="card-title">' +
             '<span class="tag ' + impl.status + '">' + impl.status + '</span>' +
@@ -744,7 +807,8 @@ const DASHBOARD_HTML = `<!doctype html>
             '<span class="tag">' + impl.type + '</span>' +
             isolationHtml +
             '<span class="mono">' + formatTime(impl.createdAt) + '</span>' +
-            "</div>";
+            "</div>" +
+            tasksHtml;
           if (isActive) {
             card.addEventListener("click", () => focusImplementer(impl.id));
           }
@@ -768,7 +832,7 @@ const DASHBOARD_HTML = `<!doctype html>
         implMeta.textContent = activeImpls + " active";
 
         renderProjectContext(projectContext, state.tasks, implementers);
-        renderImplementers(implementers);
+        renderImplementers(implementers, state.tasks);
         renderTasks(state.tasks);
         renderLocks(state.locks);
         renderNotes(state.notes);

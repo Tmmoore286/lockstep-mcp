@@ -14,6 +14,16 @@ import {
 import { loadConfig } from "./config.js";
 import { resolvePath, ensureDir } from "./utils.js";
 import { createStore } from "./storage.js";
+import {
+  createWorktree,
+  removeWorktree,
+  getWorktreeStatus,
+  mergeWorktree,
+  listWorktrees,
+  cleanupOrphanedWorktrees,
+  getWorktreeDiff,
+  isGitRepo,
+} from "./worktree.js";
 
 const config = loadConfig();
 const store = createStore(config);
@@ -190,7 +200,7 @@ const tools = [
   },
   {
     name: "task_create",
-    description: "Create a task. Complexity determines review requirements: simple=no review, medium=verify on completion, complex/critical=planner approval required",
+    description: "Create a task. Complexity determines review requirements: simple=no review, medium=verify on completion, complex/critical=planner approval required. Isolation determines whether implementer works in shared directory or isolated git worktree.",
     inputSchema: {
       type: "object",
       properties: {
@@ -198,6 +208,7 @@ const tools = [
         description: { type: "string" },
         status: { type: "string", enum: ["todo", "in_progress", "blocked", "review", "done"] },
         complexity: { type: "string", enum: ["simple", "medium", "complex", "critical"], description: "simple=1-2 files obvious fix, medium=3-5 files some ambiguity, complex=6+ files architectural decisions, critical=database/security/cross-product" },
+        isolation: { type: "string", enum: ["shared", "worktree"], description: "shared=work in main directory with locks, worktree=isolated git worktree with branch. Default: shared for simple/medium, consider worktree for complex/critical." },
         owner: { type: "string" },
         tags: { type: "array", items: { type: "string" } },
         metadata: { type: "object" },
@@ -522,13 +533,14 @@ const tools = [
   },
   {
     name: "launch_implementer",
-    description: "Launch a new implementer agent (Claude or Codex) in a new terminal window. The planner uses this to spawn workers.",
+    description: "Launch a new implementer agent (Claude or Codex) in a new terminal window. The planner uses this to spawn workers. Set isolation='worktree' to give the implementer its own git worktree for isolated changes.",
     inputSchema: {
       type: "object",
       properties: {
         type: { type: "string", enum: ["claude", "codex"], description: "Type of agent to launch" },
         name: { type: "string", description: "Name for this implementer (e.g., 'impl-1')" },
         projectRoot: { type: "string", description: "Project root path (defaults to first configured root)" },
+        isolation: { type: "string", enum: ["shared", "worktree"], description: "shared=work in main directory, worktree=create isolated git worktree. Default: shared" },
       },
       required: ["type", "name"],
       additionalProperties: false,
@@ -683,6 +695,54 @@ const tools = [
       additionalProperties: false,
     },
   },
+  // Worktree tools
+  {
+    name: "worktree_status",
+    description: "Get the status of a worktree including commits ahead/behind main, modified files, and untracked files. Use this to check an implementer's progress before merging.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        implementerId: { type: "string", description: "Implementer ID to check worktree status for" },
+      },
+      required: ["implementerId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "worktree_merge",
+    description: "Merge an implementer's worktree changes back to main. This should be called after a task is approved. If there are conflicts, returns conflict information for manual resolution.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        implementerId: { type: "string", description: "Implementer ID whose worktree to merge" },
+        targetBranch: { type: "string", description: "Branch to merge into (default: main or master)" },
+      },
+      required: ["implementerId"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "worktree_list",
+    description: "List all active lockstep worktrees in the project.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectRoot: { type: "string", description: "Project root path (defaults to first configured root)" },
+      },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "worktree_cleanup",
+    description: "Clean up orphaned worktrees that no longer have active implementers. Call this during maintenance.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectRoot: { type: "string", description: "Project root path (defaults to first configured root)" },
+      },
+      additionalProperties: false,
+    },
+  },
 ];
 
 const server = new Server(
@@ -722,11 +782,13 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const complexity = getString(args.complexity) as "simple" | "medium" | "complex" | "critical" | undefined;
         if (!title) throw new Error("title is required");
         if (!complexity) throw new Error("complexity is required (simple/medium/complex/critical)");
+        const isolation = getString(args.isolation) as "shared" | "worktree" | undefined;
         const task = await store.createTask({
           title,
           description: getString(args.description),
           status: getString(args.status) as "todo" | "in_progress" | "blocked" | "review" | "done" | undefined,
           complexity,
+          isolation: isolation ?? "shared",
           owner: getString(args.owner),
           tags: getStringArray(args.tags),
           metadata: getObject(args.metadata),
@@ -1261,13 +1323,44 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
           throw new Error("type and name are required");
         }
         const projectRoot = getString(args.projectRoot) ?? config.roots[0] ?? process.cwd();
+        const isolation = getString(args.isolation) as "shared" | "worktree" | undefined ?? "shared";
 
         // Check if this is the first implementer - if so, launch dashboard too
         const existingImplementers = await store.listImplementers(projectRoot);
         const isFirstImplementer = existingImplementers.filter(i => i.status === "active").length === 0;
 
+        // Handle worktree creation if isolation is worktree
+        let worktreePath: string | undefined;
+        let branchName: string | undefined;
+        let workingDirectory = projectRoot;
+
+        if (isolation === "worktree") {
+          // Check if this is a git repo
+          const isGit = await isGitRepo(projectRoot);
+          if (!isGit) {
+            return jsonResponse({
+              success: false,
+              error: "Cannot use worktree isolation: project is not a git repository. Use isolation='shared' instead."
+            });
+          }
+
+          try {
+            const wtResult = await createWorktree(projectRoot, name);
+            worktreePath = wtResult.worktreePath;
+            branchName = wtResult.branchName;
+            workingDirectory = worktreePath;
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown error";
+            return jsonResponse({
+              success: false,
+              error: `Failed to create worktree: ${message}. Try isolation='shared' instead.`
+            });
+          }
+        }
+
         // Build the prompt that will be injected
-        const prompt = `You are implementer ${name}. Run: coordination_init({ role: "implementer" })`;
+        const worktreeNote = isolation === "worktree" ? ` You are working in an isolated worktree at ${worktreePath}. Your changes are on branch ${branchName}.` : "";
+        const prompt = `You are implementer ${name}.${worktreeNote} Run: coordination_init({ role: "implementer" })`;
 
         // Determine the command to run
         let terminalCmd: string;
@@ -1301,20 +1394,23 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
             }).unref();
           }
 
-          // Launch the implementer terminal
-          const implCmd = `cd "${escapeForAppleScript(projectRoot)}" && ${terminalCmd}`;
+          // Launch the implementer terminal (in worktree directory if applicable)
+          const implCmd = `cd "${escapeForAppleScript(workingDirectory)}" && ${terminalCmd}`;
           // Use spawn instead of execSync to avoid blocking/session issues
           spawn("osascript", ["-e", `tell application "Terminal" to do script "${escapeForAppleScript(implCmd)}"`], {
             detached: true,
             stdio: "ignore"
           }).unref();
 
-          // Register the implementer (no PID since Terminal manages the process)
+          // Register the implementer with worktree info
           const implementer = await store.registerImplementer({
             name,
             type,
             projectRoot,
-            pid: undefined
+            pid: undefined,
+            isolation,
+            worktreePath,
+            branchName,
           });
 
           // Update project status to in_progress if it was ready
@@ -1323,8 +1419,9 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
             await store.updateProjectStatus(projectRoot, "in_progress");
           }
 
+          const worktreeMsg = isolation === "worktree" ? ` with isolated worktree (branch: ${branchName})` : "";
           await store.appendNote({
-            text: `[SYSTEM] Launched implementer "${name}" (${type})${isFirstImplementer ? " and dashboard" : ""}`,
+            text: `[SYSTEM] Launched implementer "${name}" (${type})${worktreeMsg}${isFirstImplementer ? " and dashboard" : ""}`,
             author: "system"
           });
 
@@ -1332,13 +1429,24 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
             success: true,
             implementer,
             dashboardLaunched: isFirstImplementer,
-            message: `Launched ${type} implementer "${name}" in a new terminal window.${isFirstImplementer ? " Dashboard also launched at http://127.0.0.1:8787" : ""}`
+            isolation,
+            worktreePath,
+            branchName,
+            message: `Launched ${type} implementer "${name}"${worktreeMsg} in a new terminal window.${isFirstImplementer ? " Dashboard also launched at http://127.0.0.1:8787" : ""}`
           });
         } catch (error) {
+          // Clean up worktree if launch failed
+          if (worktreePath) {
+            try {
+              await removeWorktree(worktreePath);
+            } catch {
+              // Ignore cleanup errors
+            }
+          }
           const message = error instanceof Error ? error.message : "Unknown error";
           return jsonResponse({
             success: false,
-            error: `Failed to launch implementer: ${message}. You may need to launch manually: cd '${projectRoot}' && ${terminalCmd}`
+            error: `Failed to launch implementer: ${message}. You may need to launch manually: cd '${workingDirectory}' && ${terminalCmd}`
           });
         }
       }
@@ -1570,6 +1678,165 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
           deleted,
           message: `Archived ${archived} resolved discussions older than ${archiveDays} days. Deleted ${deleted} archived discussions older than ${deleteDays} days.`
         });
+      }
+      // Worktree handlers
+      case "worktree_status": {
+        const implementerId = getString(args.implementerId);
+        if (!implementerId) throw new Error("implementerId is required");
+
+        const implementers = await store.listImplementers();
+        const impl = implementers.find(i => i.id === implementerId);
+        if (!impl) {
+          return jsonResponse({ found: false, error: "Implementer not found" });
+        }
+
+        if (impl.isolation !== "worktree" || !impl.worktreePath) {
+          return jsonResponse({
+            found: true,
+            implementer: impl,
+            isolation: impl.isolation,
+            message: "Implementer is not using worktree isolation"
+          });
+        }
+
+        try {
+          const status = await getWorktreeStatus(impl.worktreePath);
+          const diff = await getWorktreeDiff(impl.worktreePath);
+          return jsonResponse({
+            found: true,
+            implementer: impl,
+            worktreeStatus: status,
+            diff,
+            instruction: status.hasUncommittedChanges
+              ? "Implementer has uncommitted changes. They should commit before merge."
+              : status.ahead > 0
+                ? `Implementer has ${status.ahead} commit(s) ready to merge.`
+                : "No changes to merge."
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          return jsonResponse({
+            found: true,
+            implementer: impl,
+            error: `Failed to get worktree status: ${message}`
+          });
+        }
+      }
+      case "worktree_merge": {
+        const implementerId = getString(args.implementerId);
+        if (!implementerId) throw new Error("implementerId is required");
+
+        const implementers = await store.listImplementers();
+        const impl = implementers.find(i => i.id === implementerId);
+        if (!impl) {
+          return jsonResponse({ success: false, error: "Implementer not found" });
+        }
+
+        if (impl.isolation !== "worktree" || !impl.worktreePath) {
+          return jsonResponse({
+            success: false,
+            error: "Implementer is not using worktree isolation"
+          });
+        }
+
+        const targetBranch = getString(args.targetBranch);
+
+        try {
+          const result = await mergeWorktree(impl.worktreePath, targetBranch);
+
+          if (result.success && result.merged) {
+            // Optionally clean up the worktree after successful merge
+            await store.appendNote({
+              text: `[SYSTEM] Merged ${impl.name}'s worktree (${impl.branchName}) to ${targetBranch ?? "main"}`,
+              author: "system"
+            });
+          }
+
+          return jsonResponse({
+            success: result.success,
+            merged: result.merged,
+            conflicts: result.conflicts,
+            error: result.error,
+            instruction: result.conflicts
+              ? `Merge has conflicts in: ${result.conflicts.join(", ")}. Resolve manually or use task_request_changes to have implementer fix.`
+              : result.merged
+                ? "Changes merged successfully."
+                : result.error
+                  ? `Merge failed: ${result.error}`
+                  : "Nothing to merge."
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          return jsonResponse({
+            success: false,
+            error: `Failed to merge worktree: ${message}`
+          });
+        }
+      }
+      case "worktree_list": {
+        const projectRoot = getString(args.projectRoot) ?? config.roots[0] ?? process.cwd();
+
+        const isGit = await isGitRepo(projectRoot);
+        if (!isGit) {
+          return jsonResponse({
+            worktrees: [],
+            message: "Project is not a git repository"
+          });
+        }
+
+        try {
+          const worktrees = await listWorktrees(projectRoot);
+          const implementers = await store.listImplementers(projectRoot);
+
+          // Enrich worktree info with implementer data
+          const enriched = worktrees.map(wt => {
+            const impl = implementers.find(i => i.worktreePath === wt.path);
+            return {
+              ...wt,
+              implementer: impl ? { id: impl.id, name: impl.name, status: impl.status } : null
+            };
+          });
+
+          return jsonResponse({
+            count: worktrees.length,
+            worktrees: enriched
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          return jsonResponse({
+            worktrees: [],
+            error: `Failed to list worktrees: ${message}`
+          });
+        }
+      }
+      case "worktree_cleanup": {
+        const projectRoot = getString(args.projectRoot) ?? config.roots[0] ?? process.cwd();
+
+        const isGit = await isGitRepo(projectRoot);
+        if (!isGit) {
+          return jsonResponse({
+            success: false,
+            error: "Project is not a git repository"
+          });
+        }
+
+        try {
+          const cleaned = await cleanupOrphanedWorktrees(projectRoot);
+          return jsonResponse({
+            success: true,
+            cleanedCount: cleaned.length,
+            cleaned,
+            message: cleaned.length > 0
+              ? `Cleaned up ${cleaned.length} orphaned worktree(s)`
+              : "No orphaned worktrees found"
+          });
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          return jsonResponse({
+            success: false,
+            error: `Failed to cleanup worktrees: ${message}`
+          });
+        }
       }
       default:
         return errorResponse(`Unknown tool: ${name}`);

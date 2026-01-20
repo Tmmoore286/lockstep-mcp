@@ -1,176 +1,481 @@
 import http from "node:http";
 import url from "node:url";
+import { exec } from "node:child_process";
 import { WebSocketServer } from "ws";
 import { loadConfig } from "./config.js";
 import { createStore } from "./storage.js";
+import type { Implementer } from "./storage.js";
+
+// Focus a terminal window by name using AppleScript (macOS)
+function focusTerminalWindow(windowName: string): Promise<{ success: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    if (process.platform !== "darwin") {
+      resolve({ success: false, error: "Focus only supported on macOS" });
+      return;
+    }
+
+    // Try to find and focus a Terminal window that contains the implementer name
+    const script = `
+      tell application "Terminal"
+        set windowList to every window
+        repeat with w in windowList
+          try
+            set tabList to every tab of w
+            repeat with t in tabList
+              if custom title of t contains "${windowName}" then
+                set frontmost of w to true
+                activate
+                return "found"
+              end if
+            end repeat
+          end try
+        end repeat
+      end tell
+      return "not found"
+    `;
+
+    exec(`osascript -e '${script.replace(/'/g, "'\"'\"'")}'`, (error, stdout) => {
+      if (error) {
+        resolve({ success: false, error: error.message });
+      } else if (stdout.trim() === "not found") {
+        resolve({ success: false, error: "Terminal window not found" });
+      } else {
+        resolve({ success: true });
+      }
+    });
+  });
+}
+
+// Check if a process is still running by PID
+function isProcessRunning(pid: number): boolean {
+  try {
+    process.kill(pid, 0); // Signal 0 doesn't kill, just checks if process exists
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+// Clean up implementers whose processes have died
+async function cleanupDeadImplementers(
+  store: ReturnType<typeof createStore>,
+  implementers: Implementer[]
+): Promise<Implementer[]> {
+  const results: Implementer[] = [];
+  for (const impl of implementers) {
+    if (impl.status === "active" && impl.pid) {
+      if (!isProcessRunning(impl.pid)) {
+        // Process is dead, mark as stopped
+        console.log(`Implementer ${impl.name} (PID ${impl.pid}) is dead, marking as stopped`);
+        const updated = await store.updateImplementer(impl.id, "stopped");
+        results.push(updated);
+      } else {
+        results.push(impl);
+      }
+    } else {
+      results.push(impl);
+    }
+  }
+  return results;
+}
 
 const DASHBOARD_HTML = `<!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>Lockstep MCP Dashboard</title>
+    <title>Lockstep MCP</title>
     <style>
-      @import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+      @import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap");
 
       :root {
-        --bg: #f3efe6;
-        --panel: #fff8ee;
-        --ink: #1f2533;
-        --muted: #5f6470;
-        --accent: #d07a1f;
-        --accent-2: #2a7f75;
-        --line: #e2d8c7;
+        /* Palantir Blueprint Dark Theme */
+        --bg-base: #111418;
+        --bg-elevated: #1C2127;
+        --bg-card: #252A31;
+        --bg-hover: #2F343C;
+        --border: #383E47;
+        --border-light: #404854;
+
+        /* Text */
+        --text-primary: #F6F7F9;
+        --text-secondary: #ABB3BF;
+        --text-muted: #738091;
+
+        /* Accent Colors */
+        --blue: #4C90F0;
+        --blue-dim: #2D72D2;
+        --blue-glow: rgba(76, 144, 240, 0.15);
+        --green: #32A467;
+        --green-dim: #238551;
+        --green-glow: rgba(50, 164, 103, 0.15);
+        --orange: #EC9A3C;
+        --orange-glow: rgba(236, 154, 60, 0.15);
+        --red: #E76A6E;
+        --red-glow: rgba(231, 106, 110, 0.15);
+        --violet: #9D7FEA;
+        --violet-glow: rgba(157, 127, 234, 0.15);
       }
 
-      * { box-sizing: border-box; }
+      * { box-sizing: border-box; margin: 0; padding: 0; }
+
       body {
-        margin: 0;
-        font-family: "Space Grotesk", "Helvetica Neue", sans-serif;
-        color: var(--ink);
-        background: radial-gradient(circle at 10% 10%, #fff6e0 0%, var(--bg) 50%, #f0e7d6 100%);
+        font-family: "Inter", -apple-system, BlinkMacSystemFont, sans-serif;
+        color: var(--text-primary);
+        background: var(--bg-base);
+        min-height: 100vh;
+        line-height: 1.5;
       }
 
+      /* Header */
       header {
-        padding: 28px 32px 12px;
+        padding: 24px 32px;
+        border-bottom: 1px solid var(--border);
         display: flex;
-        flex-direction: column;
-        gap: 10px;
+        align-items: center;
+        justify-content: space-between;
+        background: linear-gradient(180deg, var(--bg-elevated) 0%, var(--bg-base) 100%);
       }
 
       h1 {
-        margin: 0;
-        font-size: 28px;
+        font-size: 20px;
+        font-weight: 600;
         letter-spacing: -0.02em;
+        background: linear-gradient(135deg, var(--text-primary) 0%, var(--blue) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
       }
 
-      .subtitle {
-        color: var(--muted);
-        font-size: 14px;
+      .status-badge {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 14px;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 20px;
+        font-size: 13px;
+        color: var(--text-secondary);
       }
 
+      .status-badge.connected {
+        border-color: var(--green-dim);
+        background: var(--green-glow);
+        color: var(--green);
+      }
+
+      .status-dot {
+        width: 8px;
+        height: 8px;
+        border-radius: 50%;
+        background: var(--orange);
+        box-shadow: 0 0 8px var(--orange);
+      }
+
+      .status-badge.connected .status-dot {
+        background: var(--green);
+        box-shadow: 0 0 8px var(--green);
+        animation: pulse 2s ease-in-out infinite;
+      }
+
+      @keyframes pulse {
+        0%, 100% { opacity: 1; }
+        50% { opacity: 0.5; }
+      }
+
+      /* Stats Grid */
       .stats {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-        gap: 12px;
-        padding: 0 32px 20px;
+        grid-template-columns: repeat(4, 1fr);
+        gap: 16px;
+        padding: 24px 32px;
       }
 
       .stat {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 16px;
-        padding: 14px 16px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 20px;
+        transition: all 0.2s ease;
+      }
+
+      .stat:hover {
+        border-color: var(--border-light);
+        background: var(--bg-card);
       }
 
       .stat .label {
-        color: var(--muted);
-        font-size: 12px;
+        color: var(--text-muted);
+        font-size: 11px;
+        font-weight: 500;
         text-transform: uppercase;
-        letter-spacing: 0.08em;
+        letter-spacing: 0.1em;
+        margin-bottom: 8px;
       }
 
       .stat .value {
-        font-size: 20px;
-        font-weight: 600;
+        font-size: 32px;
+        font-weight: 700;
+        letter-spacing: -0.02em;
+        background: linear-gradient(135deg, var(--text-primary) 0%, var(--text-secondary) 100%);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
       }
 
+      .stat .value.status-in_progress { color: var(--blue); -webkit-text-fill-color: var(--blue); }
+      .stat .value.status-complete { color: var(--green); -webkit-text-fill-color: var(--green); }
+      .stat .value.status-stopped { color: var(--red); -webkit-text-fill-color: var(--red); }
+
+      /* Main Grid */
       .grid {
         display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+        grid-template-columns: 1fr 1fr 1fr;
         gap: 16px;
-        padding: 0 32px 40px;
+        padding: 0 32px 32px;
       }
 
       .panel {
-        background: var(--panel);
-        border: 1px solid var(--line);
-        border-radius: 20px;
-        padding: 16px;
-        min-height: 240px;
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 12px;
         display: flex;
         flex-direction: column;
-        gap: 12px;
+        overflow: hidden;
       }
 
-      .panel h2 {
-        margin: 0;
-        font-size: 18px;
-        letter-spacing: -0.01em;
+      .panel.wide { grid-column: span 2; }
+      .panel.full { grid-column: span 3; }
+
+      .panel-header {
+        padding: 16px 20px;
+        border-bottom: 1px solid var(--border);
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        background: var(--bg-card);
+      }
+
+      .panel-header h2 {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--text-primary);
       }
 
       .pill {
         display: inline-flex;
         align-items: center;
-        gap: 6px;
-        border-radius: 999px;
+        gap: 4px;
         padding: 4px 10px;
-        font-size: 12px;
-        background: #f7e7d0;
-        color: var(--accent);
+        border-radius: 12px;
+        font-size: 11px;
+        font-weight: 500;
       }
+
+      .pill.blue { background: var(--blue-glow); color: var(--blue); }
+      .pill.green { background: var(--green-glow); color: var(--green); }
+      .pill.orange { background: var(--orange-glow); color: var(--orange); }
 
       .list {
+        padding: 12px;
         display: flex;
         flex-direction: column;
-        gap: 10px;
-        max-height: 480px;
-        overflow: auto;
-        padding-right: 6px;
+        gap: 8px;
+        max-height: 400px;
+        overflow-y: auto;
+        flex: 1;
       }
 
+      .list::-webkit-scrollbar { width: 6px; }
+      .list::-webkit-scrollbar-track { background: transparent; }
+      .list::-webkit-scrollbar-thumb { background: var(--border); border-radius: 3px; }
+
+      /* Cards */
       .card {
-        border: 1px solid var(--line);
-        border-radius: 14px;
-        padding: 12px;
-        background: #fffdf8;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        border-radius: 8px;
+        padding: 14px;
+        transition: all 0.15s ease;
+      }
+
+      .card:hover {
+        border-color: var(--border-light);
+        transform: translateY(-1px);
       }
 
       .card-title {
         font-weight: 600;
-        font-size: 14px;
-        margin-bottom: 4px;
+        font-size: 13px;
+        color: var(--text-primary);
+        margin-bottom: 6px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+      }
+
+      .card-desc {
+        font-size: 12px;
+        color: var(--text-muted);
+        margin-bottom: 10px;
+        display: -webkit-box;
+        -webkit-line-clamp: 2;
+        -webkit-box-orient: vertical;
+        overflow: hidden;
       }
 
       .card-meta {
-        font-size: 12px;
-        color: var(--muted);
         display: flex;
         flex-wrap: wrap;
         gap: 6px;
+        align-items: center;
+      }
+
+      .tag {
+        padding: 3px 8px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 500;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      .tag.todo { background: var(--bg-hover); color: var(--text-muted); }
+      .tag.in_progress { background: var(--blue-glow); color: var(--blue); }
+      .tag.review { background: var(--violet-glow); color: var(--violet); }
+      .tag.done { background: var(--green-glow); color: var(--green); }
+      .tag.active { background: var(--green-glow); color: var(--green); }
+      .tag.stopped { background: var(--red-glow); color: var(--red); }
+      .tag.terminated { background: var(--red-glow); color: var(--red); }
+      .tag.worktree { background: var(--violet-glow); color: var(--violet); }
+      .tag.shared { background: var(--bg-hover); color: var(--text-muted); }
+      .tag.branch { background: var(--violet-glow); color: var(--violet); font-size: 9px; }
+
+      /* Clickable implementer cards */
+      .card.clickable {
+        cursor: pointer;
+        position: relative;
+      }
+      .card.clickable:hover {
+        border-color: var(--blue);
+        background: var(--bg-hover);
+      }
+      .card.clickable::after {
+        content: "Click to focus";
+        position: absolute;
+        right: 10px;
+        top: 50%;
+        transform: translateY(-50%);
+        font-size: 10px;
+        color: var(--text-muted);
+        opacity: 0;
+        transition: opacity 0.15s ease;
+      }
+      .card.clickable:hover::after {
+        opacity: 1;
       }
 
       .mono {
-        font-family: "IBM Plex Mono", "Courier New", monospace;
-        font-size: 12px;
+        font-family: "JetBrains Mono", monospace;
+        font-size: 11px;
+        color: var(--text-muted);
       }
 
       .empty {
-        color: var(--muted);
+        color: var(--text-muted);
         font-size: 13px;
+        text-align: center;
+        padding: 32px 16px;
       }
 
-      footer {
-        padding: 0 32px 30px;
-        color: var(--muted);
+      /* Context Panel */
+      .context-content {
+        padding: 16px 20px;
+      }
+
+      .context-item {
+        margin-bottom: 12px;
+      }
+
+      .context-label {
+        font-size: 10px;
+        font-weight: 600;
+        text-transform: uppercase;
+        letter-spacing: 0.1em;
+        color: var(--text-muted);
+        margin-bottom: 4px;
+      }
+
+      .context-value {
+        font-size: 13px;
+        color: var(--text-secondary);
+      }
+
+      /* Note Cards */
+      .note-card {
+        background: var(--bg-card);
+        border-left: 3px solid var(--blue);
+        border-radius: 0 8px 8px 0;
+        padding: 12px 14px;
+      }
+
+      .note-card.system {
+        border-left-color: var(--violet);
+      }
+
+      .note-author {
         font-size: 12px;
+        font-weight: 600;
+        color: var(--blue);
+        margin-bottom: 4px;
+      }
+
+      .note-card.system .note-author {
+        color: var(--violet);
+      }
+
+      .note-text {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.5;
+      }
+
+      .note-time {
+        font-size: 10px;
+        color: var(--text-muted);
+        margin-top: 6px;
+        font-family: "JetBrains Mono", monospace;
+      }
+
+      /* Footer */
+      footer {
+        padding: 16px 32px;
+        border-top: 1px solid var(--border);
+        color: var(--text-muted);
+        font-size: 11px;
+        display: flex;
+        justify-content: space-between;
+      }
+
+      @media (max-width: 1024px) {
+        .stats { grid-template-columns: repeat(2, 1fr); }
+        .grid { grid-template-columns: 1fr; }
+        .panel.wide, .panel.full { grid-column: span 1; }
       }
 
       @media (max-width: 640px) {
-        header, .stats, .grid, footer {
-          padding-left: 18px;
-          padding-right: 18px;
-        }
+        header, .stats, .grid, footer { padding-left: 16px; padding-right: 16px; }
+        .stats { grid-template-columns: 1fr; }
       }
     </style>
   </head>
   <body>
     <header>
-      <h1>Lockstep MCP Dashboard</h1>
-      <div class="subtitle" id="status">Connecting...</div>
+      <h1>Lockstep MCP</h1>
+      <div class="status-badge" id="status-badge">
+        <div class="status-dot" id="status-dot"></div>
+        <span id="status">Connecting</span>
+      </div>
     </header>
 
     <section class="stats">
@@ -179,50 +484,65 @@ const DASHBOARD_HTML = `<!doctype html>
         <div class="value" id="project-status">--</div>
       </div>
       <div class="stat">
-        <div class="label">Tasks</div>
+        <div class="label">Total Tasks</div>
         <div class="value" id="task-count">0</div>
       </div>
       <div class="stat">
-        <div class="label">Implementers</div>
+        <div class="label">Active Implementers</div>
         <div class="value" id="implementer-count">0</div>
       </div>
       <div class="stat">
-        <div class="label">Locks</div>
+        <div class="label">File Locks</div>
         <div class="value" id="lock-count">0</div>
       </div>
     </section>
 
     <section class="grid">
       <div class="panel">
-        <h2>Project Context</h2>
-        <div id="project-context" class="list">
-          <div class="empty">No project context set.</div>
+        <div class="panel-header">
+          <h2>Project Context</h2>
+        </div>
+        <div id="project-context" class="context-content">
+          <div class="empty">No project context set</div>
         </div>
       </div>
       <div class="panel">
-        <h2>Implementers <span class="pill" id="impl-meta">0 active</span></h2>
+        <div class="panel-header">
+          <h2>Implementers</h2>
+          <span class="pill green" id="impl-meta">0 active</span>
+        </div>
         <div class="list" id="implementer-list"></div>
       </div>
       <div class="panel">
-        <h2>Tasks <span class="pill" id="task-meta">0 total</span></h2>
+        <div class="panel-header">
+          <h2>Locks</h2>
+          <span class="pill orange" id="lock-meta">0 active</span>
+        </div>
+        <div class="list" id="lock-list"></div>
+      </div>
+      <div class="panel wide">
+        <div class="panel-header">
+          <h2>Tasks</h2>
+          <span class="pill blue" id="task-meta">0 total</span>
+        </div>
         <div class="list" id="task-list"></div>
       </div>
       <div class="panel">
-        <h2>Locks <span class="pill" id="lock-meta">0 active</span></h2>
-        <div class="list" id="lock-list"></div>
-      </div>
-      <div class="panel" style="grid-column: span 2;">
-        <h2>Notes</h2>
+        <div class="panel-header">
+          <h2>Notes</h2>
+        </div>
         <div class="list" id="note-list"></div>
       </div>
     </section>
 
     <footer>
-      Live view of Lockstep MCP tasks, locks, and notes. Updates stream via WebSocket.
+      <span>Lockstep MCP - Multi-agent coordination</span>
+      <span>Updates via WebSocket</span>
     </footer>
 
     <script>
       const statusEl = document.getElementById("status");
+      const statusBadge = document.getElementById("status-badge");
       const projectStatusEl = document.getElementById("project-status");
       const projectContextEl = document.getElementById("project-context");
       const implementerList = document.getElementById("implementer-list");
@@ -237,37 +557,52 @@ const DASHBOARD_HTML = `<!doctype html>
       const implMeta = document.getElementById("impl-meta");
 
       function escapeHtml(text) {
-        return text.replace(/[&<>\"']/g, (char) => ({
-          "&": "&amp;",
-          "<": "&lt;",
-          ">": "&gt;",
-          "\"": "&quot;",
-          "'": "&#39;"
-        }[char]));
+        const map = {
+          '&': '&amp;',
+          '<': '&lt;',
+          '>': '&gt;',
+          '"': '&quot;',
+          "'": '&#39;'
+        };
+        return text.replace(/[&<>"']/g, (char) => map[char]);
+      }
+
+      function formatTime(isoString) {
+        const date = new Date(isoString);
+        return date.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
       }
 
       function renderTasks(tasks) {
         taskList.innerHTML = "";
         if (!tasks.length) {
-          taskList.innerHTML = '<div class="empty">No tasks yet.</div>';
+          taskList.innerHTML = '<div class="empty">No tasks yet</div>';
           return;
         }
-        tasks.forEach(task => {
+        // Sort: in_progress first, then review, then todo, then done
+        const order = { in_progress: 0, review: 1, todo: 2, done: 3 };
+        const sorted = [...tasks].sort((a, b) => (order[a.status] || 99) - (order[b.status] || 99));
+        sorted.forEach(task => {
           const card = document.createElement("div");
           card.className = "card";
           const desc = task.description
-            ? '<div class="card-meta">' + escapeHtml(task.description) + "</div>"
+            ? '<div class="card-desc">' + escapeHtml(task.description.substring(0, 150)) + (task.description.length > 150 ? '...' : '') + "</div>"
             : "";
-          const tags = task.tags && task.tags.length ? " | tags: " + task.tags.join(", ") : "";
+          // Show isolation mode if set to worktree
+          const isolationTag = task.isolation === "worktree"
+            ? '<span class="tag worktree">worktree</span>'
+            : '';
           card.innerHTML =
-            '<div class="card-title">' + escapeHtml(task.title) + "</div>" +
-            desc +
-            '<div class="card-meta mono">' +
-            task.status +
-            (task.owner ? " | owner: " + task.owner : "") +
-            tags +
+            '<div class="card-title">' +
+            '<span class="tag ' + task.status + '">' + task.status.replace('_', ' ') + '</span>' +
+            escapeHtml(task.title) +
             "</div>" +
-            '<div class="card-meta mono">updated: ' + task.updatedAt + "</div>";
+            desc +
+            '<div class="card-meta">' +
+            (task.owner ? '<span class="mono">@' + escapeHtml(task.owner) + '</span>' : '') +
+            (task.complexity ? '<span class="tag">' + task.complexity + '</span>' : '') +
+            isolationTag +
+            '<span class="mono">' + formatTime(task.updatedAt) + '</span>' +
+            "</div>";
           taskList.appendChild(card);
         });
       }
@@ -275,19 +610,23 @@ const DASHBOARD_HTML = `<!doctype html>
       function renderLocks(locks) {
         lockList.innerHTML = "";
         if (!locks.length) {
-          lockList.innerHTML = '<div class="empty">No locks.</div>';
+          lockList.innerHTML = '<div class="empty">No active locks</div>';
           return;
         }
         locks.forEach(lock => {
           const card = document.createElement("div");
           card.className = "card";
+          const fileName = lock.path.split('/').pop();
           card.innerHTML =
-            '<div class="card-title">' + escapeHtml(lock.path) + "</div>" +
-            '<div class="card-meta mono">' +
-            lock.status +
-            (lock.owner ? " | owner: " + lock.owner : "") +
+            '<div class="card-title">' +
+            '<span class="tag ' + lock.status + '">' + lock.status + '</span>' +
+            escapeHtml(fileName) +
             "</div>" +
-            '<div class="card-meta mono">updated: ' + lock.updatedAt + "</div>";
+            '<div class="card-desc mono">' + escapeHtml(lock.path) + '</div>' +
+            '<div class="card-meta">' +
+            (lock.owner ? '<span class="mono">@' + escapeHtml(lock.owner) + '</span>' : '') +
+            '<span class="mono">' + formatTime(lock.updatedAt) + '</span>' +
+            "</div>";
           lockList.appendChild(card);
         });
       }
@@ -295,77 +634,120 @@ const DASHBOARD_HTML = `<!doctype html>
       function renderNotes(notes) {
         noteList.innerHTML = "";
         if (!notes.length) {
-          noteList.innerHTML = '<div class="empty">No notes yet.</div>';
+          noteList.innerHTML = '<div class="empty">No notes yet</div>';
           return;
         }
-        // Show newest first
-        const sorted = [...notes].reverse();
+        const sorted = [...notes].reverse().slice(0, 10);
         sorted.forEach(note => {
           const card = document.createElement("div");
-          card.className = "card";
           const isSystem = note.author === "system";
+          card.className = "note-card" + (isSystem ? " system" : "");
           card.innerHTML =
-            '<div class="card-title"' + (isSystem ? ' style="color: var(--accent-2)"' : '') + '>' +
-            (note.author ? escapeHtml(note.author) : "Anonymous") +
-            "</div>" +
-            '<div class="card-meta">' +
-            escapeHtml(note.text) +
-            "</div>" +
-            '<div class="card-meta mono">' + note.createdAt + "</div>";
+            '<div class="note-author">' + (note.author ? escapeHtml(note.author) : "Anonymous") + '</div>' +
+            '<div class="note-text">' + escapeHtml(note.text) + '</div>' +
+            '<div class="note-time">' + formatTime(note.createdAt) + '</div>';
           noteList.appendChild(card);
         });
       }
 
-      function renderProjectContext(context) {
+      // Compute dynamic status based on tasks and implementers
+      function computeDynamicStatus(context, tasks, implementers) {
+        const activeImpls = (implementers || []).filter(i => i.status === "active").length;
+        const todoTasks = tasks.filter(t => t.status === "todo" || t.status === "in_progress" || t.status === "review").length;
+        const allDone = tasks.length > 0 && todoTasks === 0;
+
+        if (allDone) {
+          return { text: "Complete", className: "status-complete" };
+        }
+        if (activeImpls === 0 && tasks.length > 0) {
+          return { text: "Paused", className: "status-stopped" };
+        }
+        if (context && context.status) {
+          return { text: context.status.replace('_', ' '), className: "status-" + context.status };
+        }
+        return { text: "--", className: "" };
+      }
+
+      function renderProjectContext(context, tasks, implementers) {
         if (!context) {
-          projectContextEl.innerHTML = '<div class="empty">No project context set.</div>';
-          projectStatusEl.textContent = "--";
+          projectContextEl.innerHTML = '<div class="empty">No project context set</div>';
+          const dynamicStatus = computeDynamicStatus(null, tasks || [], implementers || []);
+          projectStatusEl.textContent = dynamicStatus.text;
+          projectStatusEl.className = "value " + dynamicStatus.className;
           return;
         }
-        projectStatusEl.textContent = context.status || "planning";
-        projectStatusEl.style.color =
-          context.status === "complete" ? "var(--accent-2)" :
-          context.status === "stopped" ? "#c44" :
-          context.status === "in_progress" ? "var(--accent)" : "var(--ink)";
+        const dynamicStatus = computeDynamicStatus(context, tasks || [], implementers || []);
+        projectStatusEl.textContent = dynamicStatus.text;
+        projectStatusEl.className = "value " + dynamicStatus.className;
 
-        let html = '<div class="card">';
-        html += '<div class="card-title">' + escapeHtml(context.description || "No description") + '</div>';
-        html += '<div class="card-meta"><strong>End State:</strong> ' + escapeHtml(context.endState || "Not defined") + '</div>';
+        let html = '';
+        html += '<div class="context-item"><div class="context-label">Description</div>';
+        html += '<div class="context-value">' + escapeHtml(context.description || "No description") + '</div></div>';
+
+        html += '<div class="context-item"><div class="context-label">End State</div>';
+        html += '<div class="context-value">' + escapeHtml(context.endState || "Not defined") + '</div></div>';
 
         if (context.techStack && context.techStack.length) {
-          html += '<div class="card-meta"><strong>Tech:</strong> ' + context.techStack.map(escapeHtml).join(", ") + '</div>';
-        }
-        if (context.acceptanceCriteria && context.acceptanceCriteria.length) {
-          html += '<div class="card-meta"><strong>Acceptance:</strong> ' + context.acceptanceCriteria.map(escapeHtml).join("; ") + '</div>';
+          html += '<div class="context-item"><div class="context-label">Tech Stack</div>';
+          html += '<div class="context-value">' + context.techStack.map(escapeHtml).join(", ") + '</div></div>';
         }
         if (context.implementationPlan && context.implementationPlan.length) {
-          html += '<div class="card-meta"><strong>Plan:</strong> ' + context.implementationPlan.length + ' steps</div>';
+          html += '<div class="context-item"><div class="context-label">Plan Steps</div>';
+          html += '<div class="context-value">' + context.implementationPlan.length + ' steps defined</div></div>';
         }
         if (context.preferredImplementer) {
-          html += '<div class="card-meta mono">Implementer type: ' + context.preferredImplementer + '</div>';
+          html += '<div class="context-item"><div class="context-label">Implementer Type</div>';
+          html += '<div class="context-value">' + context.preferredImplementer + '</div></div>';
         }
-        html += '</div>';
         projectContextEl.innerHTML = html;
+      }
+
+      async function focusImplementer(implId) {
+        try {
+          const response = await fetch("/api/focus/" + encodeURIComponent(implId), { method: "POST" });
+          const result = await response.json();
+          if (!result.success) {
+            console.error("Failed to focus:", result.error);
+          }
+        } catch (err) {
+          console.error("Failed to focus implementer:", err);
+        }
       }
 
       function renderImplementers(implementers) {
         implementerList.innerHTML = "";
         if (!implementers || !implementers.length) {
-          implementerList.innerHTML = '<div class="empty">No implementers launched.</div>';
+          implementerList.innerHTML = '<div class="empty">No implementers launched</div>';
           return;
         }
         implementers.forEach(impl => {
           const card = document.createElement("div");
-          card.className = "card";
           const isActive = impl.status === "active";
+          const isWorktree = impl.isolation === "worktree";
+          card.className = "card" + (isActive ? " clickable" : "");
+
+          // Build isolation/branch display
+          let isolationHtml = '';
+          if (isWorktree && impl.branchName) {
+            isolationHtml = '<span class="tag worktree">worktree</span>' +
+              '<span class="tag branch">' + escapeHtml(impl.branchName) + '</span>';
+          } else if (impl.isolation) {
+            isolationHtml = '<span class="tag ' + impl.isolation + '">' + impl.isolation + '</span>';
+          }
+
           card.innerHTML =
-            '<div class="card-title"' + (isActive ? ' style="color: var(--accent-2)"' : ' style="color: var(--muted)"') + '>' +
-            escapeHtml(impl.name) + " (" + impl.type + ")" +
-            "</div>" +
-            '<div class="card-meta mono">' +
-            impl.status +
-            "</div>" +
-            '<div class="card-meta mono">started: ' + impl.createdAt + "</div>";
+            '<div class="card-title">' +
+            '<span class="tag ' + impl.status + '">' + impl.status + '</span>' +
+            escapeHtml(impl.name) +
+            '</div>' +
+            '<div class="card-meta">' +
+            '<span class="tag">' + impl.type + '</span>' +
+            isolationHtml +
+            '<span class="mono">' + formatTime(impl.createdAt) + '</span>' +
+            "</div>";
+          if (isActive) {
+            card.addEventListener("click", () => focusImplementer(impl.id));
+          }
           implementerList.appendChild(card);
         });
       }
@@ -385,7 +767,7 @@ const DASHBOARD_HTML = `<!doctype html>
         lockMeta.textContent = activeLocks + " active";
         implMeta.textContent = activeImpls + " active";
 
-        renderProjectContext(projectContext);
+        renderProjectContext(projectContext, state.tasks, implementers);
         renderImplementers(implementers);
         renderTasks(state.tasks);
         renderLocks(state.locks);
@@ -412,7 +794,8 @@ const DASHBOARD_HTML = `<!doctype html>
 
         socket.addEventListener("open", () => {
           console.log("WebSocket connected");
-          statusEl.textContent = "Connected - live updates";
+          statusEl.textContent = "Live";
+          statusBadge.classList.add("connected");
         });
 
         socket.addEventListener("message", (event) => {
@@ -425,20 +808,21 @@ const DASHBOARD_HTML = `<!doctype html>
 
         socket.addEventListener("error", (event) => {
           console.error("WebSocket error:", event);
+          statusBadge.classList.remove("connected");
         });
 
         socket.addEventListener("close", (event) => {
           console.log("WebSocket closed:", event.code, event.reason);
-          statusEl.textContent = "Disconnected - retrying...";
+          statusEl.textContent = "Reconnecting";
+          statusBadge.classList.remove("connected");
           setTimeout(connect, 2000);
         });
       }
 
-      // Load initial data immediately
+      // Load initial data immediately, then connect for live updates
       fetchState().then(() => {
         console.log("Initial fetch complete");
       });
-      // Then connect for live updates
       connect();
     </script>
   </body>
@@ -462,14 +846,47 @@ export async function startDashboard(options: DashboardOptions = {}) {
 
   const server = http.createServer(async (req, res) => {
     const parsed = url.parse(req.url || "");
+
+    // Handle focus implementer API
+    const focusMatch = parsed.pathname?.match(/^\/api\/focus\/(.+)$/);
+    if (focusMatch && req.method === "POST") {
+      const implId = decodeURIComponent(focusMatch[1]);
+      const implementers = await store.listImplementers();
+      const impl = implementers.find(i => i.id === implId);
+
+      if (!impl) {
+        res.writeHead(404, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: "Implementer not found" }));
+        return;
+      }
+
+      if (impl.status !== "active") {
+        res.writeHead(400, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: "Implementer is not active" }));
+        return;
+      }
+
+      const result = await focusTerminalWindow(impl.name);
+      res.writeHead(result.success ? 200 : 400, { "Content-Type": "application/json" });
+      res.end(JSON.stringify(result));
+      return;
+    }
+
     if (parsed.pathname === "/api/state") {
       const state = await store.status();
-      const projectRoot = config.roots[0] ?? process.cwd();
-      const projectContext = await store.getProjectContext(projectRoot);
-      const implementers = await store.listImplementers(projectRoot);
+      // Get ALL project contexts and implementers (not filtered by root)
+      const allContexts = await store.listAllProjectContexts();
+      // Use the most recently updated context, or first one
+      const projectContext = allContexts.length > 0
+        ? allContexts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+        : null;
+      // Get implementers and clean up any dead processes
+      const rawImplementers = await store.listImplementers();
+      const implementers = await cleanupDeadImplementers(store, rawImplementers);
       const payload = {
         state,
         projectContext,
+        allContexts,
         implementers,
         config: {
           mode: config.mode,
@@ -509,16 +926,19 @@ export async function startDashboard(options: DashboardOptions = {}) {
     }
   };
 
-  const projectRoot = config.roots[0] ?? process.cwd();
-
   const sendSnapshot = async () => {
     const state = await store.status();
-    const projectContext = await store.getProjectContext(projectRoot);
-    const implementers = await store.listImplementers(projectRoot);
+    const allContexts = await store.listAllProjectContexts();
+    const projectContext = allContexts.length > 0
+      ? allContexts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+      : null;
+    const rawImplementers = await store.listImplementers();
+    const implementers = await cleanupDeadImplementers(store, rawImplementers);
     broadcast({
       type: "snapshot",
       state,
       projectContext,
+      allContexts,
       implementers,
       config: {
         mode: config.mode,
@@ -537,8 +957,12 @@ export async function startDashboard(options: DashboardOptions = {}) {
   let lastHash = "";
   const poll = async () => {
     const state = await store.status();
-    const projectContext = await store.getProjectContext(projectRoot);
-    const implementers = await store.listImplementers(projectRoot);
+    const allContexts = await store.listAllProjectContexts();
+    const projectContext = allContexts.length > 0
+      ? allContexts.sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0]
+      : null;
+    const rawImplementers = await store.listImplementers();
+    const implementers = await cleanupDeadImplementers(store, rawImplementers);
     const next = JSON.stringify({ state, projectContext, implementers });
     if (next !== lastHash) {
       lastHash = next;
@@ -546,6 +970,7 @@ export async function startDashboard(options: DashboardOptions = {}) {
         type: "state",
         state,
         projectContext,
+        allContexts,
         implementers,
         config: {
           mode: config.mode,

@@ -7,6 +7,7 @@ import type { Config } from "./config.js";
 
 export type TaskStatus = "todo" | "in_progress" | "blocked" | "review" | "done";
 export type TaskComplexity = "simple" | "medium" | "complex" | "critical";
+export type TaskIsolation = "shared" | "worktree";
 export type LockStatus = "active" | "resolved";
 
 export type Task = {
@@ -15,6 +16,7 @@ export type Task = {
   description?: string;
   status: TaskStatus;
   complexity: TaskComplexity;
+  isolation: TaskIsolation;
   owner?: string;
   tags?: string[];
   metadata?: Record<string, unknown>;
@@ -59,6 +61,8 @@ export type ProjectContext = {
   updatedAt: string;
 };
 
+export type ImplementerIsolation = "shared" | "worktree";
+
 export type Implementer = {
   id: string;
   name: string;
@@ -66,6 +70,9 @@ export type Implementer = {
   projectRoot: string;
   status: "active" | "stopped";
   pid?: number;
+  isolation: ImplementerIsolation;
+  worktreePath?: string;    // Path to worktree directory (if isolation="worktree")
+  branchName?: string;      // Git branch name for this implementer
   createdAt: string;
   updatedAt: string;
 };
@@ -117,6 +124,7 @@ export interface Store {
     description?: string;
     status?: TaskStatus;
     complexity?: TaskComplexity;
+    isolation?: TaskIsolation;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
@@ -127,6 +135,7 @@ export interface Store {
     description?: string;
     status?: TaskStatus;
     complexity?: TaskComplexity;
+    isolation?: TaskIsolation;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
@@ -173,12 +182,16 @@ export interface Store {
     status?: ProjectStatus;
   }): Promise<ProjectContext>;
   getProjectContext(projectRoot: string): Promise<ProjectContext | null>;
+  listAllProjectContexts(): Promise<ProjectContext[]>;
   updateProjectStatus(projectRoot: string, status: ProjectStatus): Promise<ProjectContext>;
   registerImplementer(input: {
     name: string;
     type: "claude" | "codex";
     projectRoot: string;
     pid?: number;
+    isolation?: ImplementerIsolation;
+    worktreePath?: string;
+    branchName?: string;
   }): Promise<Implementer>;
   updateImplementer(id: string, status: "active" | "stopped"): Promise<Implementer>;
   listImplementers(projectRoot?: string): Promise<Implementer[]>;
@@ -317,6 +330,7 @@ export class JsonStore implements Store {
     description?: string;
     status?: TaskStatus;
     complexity?: TaskComplexity;
+    isolation?: TaskIsolation;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
@@ -329,6 +343,7 @@ export class JsonStore implements Store {
         description: input.description,
         status: input.status ?? "todo",
         complexity: input.complexity ?? "medium",
+        isolation: input.isolation ?? "shared",
         owner: input.owner,
         tags: input.tags,
         metadata: input.metadata,
@@ -524,6 +539,11 @@ export class JsonStore implements Store {
     return contexts[projectRoot] ?? null;
   }
 
+  async listAllProjectContexts(): Promise<ProjectContext[]> {
+    const contexts = await this.loadContexts();
+    return Object.values(contexts);
+  }
+
   async updateProjectStatus(projectRoot: string, status: ProjectStatus): Promise<ProjectContext> {
     return this.withStateLock(async () => {
       const contexts = await this.loadContexts();
@@ -561,6 +581,9 @@ export class JsonStore implements Store {
     type: "claude" | "codex";
     projectRoot: string;
     pid?: number;
+    isolation?: ImplementerIsolation;
+    worktreePath?: string;
+    branchName?: string;
   }): Promise<Implementer> {
     return this.withStateLock(async () => {
       const implementers = await this.loadImplementers();
@@ -571,6 +594,9 @@ export class JsonStore implements Store {
         projectRoot: input.projectRoot,
         status: "active",
         pid: input.pid,
+        isolation: input.isolation ?? "shared",
+        worktreePath: input.worktreePath,
+        branchName: input.branchName,
         createdAt: nowIso(),
         updatedAt: nowIso(),
       };
@@ -654,6 +680,7 @@ type TaskRow = {
   description: string | null;
   status: TaskStatus;
   complexity: TaskComplexity;
+  isolation: TaskIsolation;
   owner: string | null;
   tags: string | null;
   metadata: string | null;
@@ -702,6 +729,9 @@ type ImplementerRow = {
   project_root: string;
   status: string;
   pid: number | null;
+  isolation: string;
+  worktree_path: string | null;
+  branch_name: string | null;
   created_at: string;
   updated_at: string;
 };
@@ -751,6 +781,7 @@ export class SqliteStore implements Store {
         description TEXT,
         status TEXT NOT NULL,
         complexity TEXT NOT NULL DEFAULT 'medium',
+        isolation TEXT NOT NULL DEFAULT 'shared',
         owner TEXT,
         tags TEXT,
         metadata TEXT,
@@ -798,6 +829,9 @@ export class SqliteStore implements Store {
         project_root TEXT NOT NULL,
         status TEXT NOT NULL DEFAULT 'active',
         pid INTEGER,
+        isolation TEXT NOT NULL DEFAULT 'shared',
+        worktree_path TEXT,
+        branch_name TEXT,
         created_at TEXT NOT NULL,
         updated_at TEXT NOT NULL
       );
@@ -865,6 +899,19 @@ export class SqliteStore implements Store {
     try {
       this.db.exec("ALTER TABLE tasks ADD COLUMN review_requested_at TEXT");
     } catch { /* column exists */ }
+    // Worktree isolation columns
+    try {
+      this.db.exec("ALTER TABLE tasks ADD COLUMN isolation TEXT NOT NULL DEFAULT 'shared'");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE implementers ADD COLUMN isolation TEXT NOT NULL DEFAULT 'shared'");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE implementers ADD COLUMN worktree_path TEXT");
+    } catch { /* column exists */ }
+    try {
+      this.db.exec("ALTER TABLE implementers ADD COLUMN branch_name TEXT");
+    } catch { /* column exists */ }
   }
 
   private getDb(): Database.Database {
@@ -879,6 +926,7 @@ export class SqliteStore implements Store {
       description: row.description ?? undefined,
       status: row.status,
       complexity: row.complexity ?? "medium",
+      isolation: row.isolation ?? "shared",
       owner: row.owner ?? undefined,
       tags: row.tags ? (JSON.parse(row.tags) as string[]) : undefined,
       metadata: row.metadata ? (JSON.parse(row.metadata) as Record<string, unknown>) : undefined,
@@ -927,6 +975,7 @@ export class SqliteStore implements Store {
     description?: string;
     status?: TaskStatus;
     complexity?: TaskComplexity;
+    isolation?: TaskIsolation;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
@@ -938,6 +987,7 @@ export class SqliteStore implements Store {
       description: input.description,
       status: input.status ?? "todo",
       complexity: input.complexity ?? "medium",
+      isolation: input.isolation ?? "shared",
       owner: input.owner,
       tags: input.tags,
       metadata: input.metadata,
@@ -946,14 +996,15 @@ export class SqliteStore implements Store {
     };
 
     db.prepare(
-      `INSERT INTO tasks (id, title, description, status, complexity, owner, tags, metadata, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO tasks (id, title, description, status, complexity, isolation, owner, tags, metadata, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       task.id,
       task.title,
       task.description ?? null,
       task.status,
       task.complexity,
+      task.isolation,
       task.owner ?? null,
       task.tags ? JSON.stringify(task.tags) : null,
       task.metadata ? JSON.stringify(task.metadata) : null,
@@ -971,6 +1022,7 @@ export class SqliteStore implements Store {
     description?: string;
     status?: TaskStatus;
     complexity?: TaskComplexity;
+    isolation?: TaskIsolation;
     owner?: string;
     tags?: string[];
     metadata?: Record<string, unknown>;
@@ -987,6 +1039,7 @@ export class SqliteStore implements Store {
     if (input.description !== undefined) task.description = input.description;
     if (input.status !== undefined) task.status = input.status;
     if (input.complexity !== undefined) task.complexity = input.complexity;
+    if (input.isolation !== undefined) task.isolation = input.isolation;
     if (input.owner !== undefined) task.owner = input.owner;
     if (input.tags !== undefined) task.tags = input.tags;
     if (input.metadata !== undefined) task.metadata = input.metadata;
@@ -997,7 +1050,7 @@ export class SqliteStore implements Store {
 
     db.prepare(
       `UPDATE tasks
-       SET title = ?, description = ?, status = ?, complexity = ?, owner = ?, tags = ?, metadata = ?,
+       SET title = ?, description = ?, status = ?, complexity = ?, isolation = ?, owner = ?, tags = ?, metadata = ?,
            review_notes = ?, review_feedback = ?, review_requested_at = ?, updated_at = ?
        WHERE id = ?`
     ).run(
@@ -1005,6 +1058,7 @@ export class SqliteStore implements Store {
       task.description ?? null,
       task.status,
       task.complexity,
+      task.isolation,
       task.owner ?? null,
       task.tags ? JSON.stringify(task.tags) : null,
       task.metadata ? JSON.stringify(task.metadata) : null,
@@ -1227,6 +1281,9 @@ export class SqliteStore implements Store {
       projectRoot: row.project_root,
       status: row.status as "active" | "stopped",
       pid: row.pid ?? undefined,
+      isolation: (row.isolation as ImplementerIsolation) ?? "shared",
+      worktreePath: row.worktree_path ?? undefined,
+      branchName: row.branch_name ?? undefined,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
     };
@@ -1316,6 +1373,14 @@ export class SqliteStore implements Store {
     return row ? this.parseProjectContext(row) : null;
   }
 
+  async listAllProjectContexts(): Promise<ProjectContext[]> {
+    const db = this.getDb();
+    const rows = db
+      .prepare("SELECT * FROM project_contexts ORDER BY updated_at DESC")
+      .all() as ProjectContextRow[];
+    return rows.map((row) => this.parseProjectContext(row));
+  }
+
   async updateProjectStatus(projectRoot: string, status: ProjectStatus): Promise<ProjectContext> {
     const db = this.getDb();
     const row = db
@@ -1340,6 +1405,9 @@ export class SqliteStore implements Store {
     type: "claude" | "codex";
     projectRoot: string;
     pid?: number;
+    isolation?: ImplementerIsolation;
+    worktreePath?: string;
+    branchName?: string;
   }): Promise<Implementer> {
     const db = this.getDb();
     const implementer: Implementer = {
@@ -1349,13 +1417,16 @@ export class SqliteStore implements Store {
       projectRoot: input.projectRoot,
       status: "active",
       pid: input.pid,
+      isolation: input.isolation ?? "shared",
+      worktreePath: input.worktreePath,
+      branchName: input.branchName,
       createdAt: nowIso(),
       updatedAt: nowIso(),
     };
 
     db.prepare(
-      `INSERT INTO implementers (id, name, type, project_root, status, pid, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+      `INSERT INTO implementers (id, name, type, project_root, status, pid, isolation, worktree_path, branch_name, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(
       implementer.id,
       implementer.name,
@@ -1363,6 +1434,9 @@ export class SqliteStore implements Store {
       implementer.projectRoot,
       implementer.status,
       implementer.pid ?? null,
+      implementer.isolation,
+      implementer.worktreePath ?? null,
+      implementer.branchName ?? null,
       implementer.createdAt,
       implementer.updatedAt
     );

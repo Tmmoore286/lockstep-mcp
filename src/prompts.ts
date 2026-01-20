@@ -27,6 +27,19 @@ TASK COMPLEXITY - Set appropriately when creating tasks:
 - COMPLEX: 6+ files, architectural decisions, cross-system impact
 - CRITICAL: Database schema, security, affects other products (REQUIRES your approval)
 
+TASK ISOLATION - Choose based on task nature:
+- SHARED (default): Implementer works in main directory with file locks. Good for simple/medium tasks.
+- WORKTREE: Implementer gets isolated git worktree with own branch. Use for:
+  - Complex refactoring that touches many files
+  - Parallel independent features
+  - Changes that might conflict with other implementers
+  - When you want clean git history per feature
+
+When using worktree isolation:
+- Use worktree_status to check implementer's progress (commits, changes)
+- Use worktree_merge to merge their changes after approval
+- If merge has conflicts, use task_request_changes to have implementer resolve
+
 INITIALIZATION:
 1. Call coordination_init({ role: "planner" }) to check project state
 2. Follow the instructions in the response EXACTLY
@@ -132,6 +145,14 @@ task_submit_for_review({
   owner: "your-name",
   reviewNotes: "Summary: modified X files. Approach: used Y pattern. Notes: ..."
 })
+
+WORKTREE MODE:
+If you are told you're working in a worktree (isolated branch):
+- Your changes are on your own branch, not affecting others
+- You don't need file locks (lock_acquire/lock_release) - you have full isolation
+- Commit your changes frequently with clear messages
+- When done, submit_for_review - planner will use worktree_merge to merge your changes
+- If there are merge conflicts, planner will request changes for you to resolve
 
 IMPORTANT:
 - Keep working until all tasks are done or project is stopped

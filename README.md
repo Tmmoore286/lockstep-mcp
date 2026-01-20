@@ -2,6 +2,15 @@
 
 Lockstep MCP is a multi-agent coordination server that enables Claude, Codex, and other AI agents to work together on the same project without conflicts. It provides shared state (tasks, locks, notes) so agents can coordinate their work.
 
+## Features
+
+- **Task Management** - Create, assign, and track tasks with complexity levels and review workflow
+- **File Locking** - Prevent conflicts when multiple agents edit the same files
+- **Git Worktree Isolation** - Optional isolated branches for complex/parallel work
+- **Real-time Dashboard** - Monitor all agents, tasks, and locks in a web UI
+- **Discussion System** - Agents can discuss architectural decisions
+- **Multi-platform Launchers** - tmux and macOS Terminal launchers
+
 ## For AI Agents: Installation Instructions
 
 If you are an AI agent (Claude, Codex, or similar) and have been asked to install lockstep-mcp, follow these steps exactly:
@@ -227,6 +236,19 @@ Open Claude and Codex in your project. Tell one "you're the planner" and the oth
 | `task_claim` | Claim a task (sets status to in_progress) | `id`, `owner` |
 | `task_update` | Update a task | `id` |
 | `task_list` | List tasks with optional filters. Also returns `projectStatus`. | (none) |
+| `task_submit_for_review` | Submit completed task for planner review | `id`, `owner`, `reviewNotes` |
+| `task_approve` | Planner approves a task | `id` |
+| `task_request_changes` | Planner requests changes on a task | `id`, `feedback` |
+
+**Task Complexity Levels:**
+- `simple` - 1-2 files, obvious fix, no architectural decisions
+- `medium` - 3-5 files, some ambiguity, needs verification
+- `complex` - 6+ files, architectural decisions, cross-system impact
+- `critical` - Database schema, security, affects other products (requires planner approval)
+
+**Task Isolation Modes:**
+- `shared` (default) - Implementer works in main directory with file locks
+- `worktree` - Implementer gets isolated git worktree with own branch (good for complex/parallel work)
 
 ### Lock Tools
 
@@ -251,6 +273,24 @@ Open Claude and Codex in your project. Tell one "you're the planner" and the oth
 | `file_write` | Write to a file | `path`, `content` |
 | `artifact_read` | Read an artifact | `path` |
 | `artifact_write` | Write an artifact | `path`, `content` |
+
+### Discussion Tools
+
+| Tool | Description | Required Parameters |
+|------|-------------|---------------------|
+| `discussion_start` | Start a discussion with another agent | `topic`, `message`, `author`, `waitingOn` |
+| `discussion_reply` | Reply to a discussion | `id`, `message`, `author` |
+| `discussion_resolve` | Mark a discussion as resolved | `id` |
+| `discussion_inbox` | Get discussions waiting on an agent | `agent` |
+
+### Worktree Tools
+
+| Tool | Description | Required Parameters |
+|------|-------------|---------------------|
+| `worktree_status` | Get status of an implementer's worktree | `implementer` |
+| `worktree_merge` | Merge worktree changes back to main | `implementer` |
+| `worktree_list` | List all active worktrees | (none) |
+| `worktree_cleanup` | Clean up orphaned worktrees | (none) |
 
 ### Other Tools
 
@@ -317,6 +357,37 @@ Agents use locks to prevent editing the same file simultaneously:
 
 If another agent tries to acquire a lock on a file that's already locked, they'll get an error and should wait.
 
+### Git Worktree Isolation
+
+For complex or parallel work, agents can use isolated git worktrees instead of file locks:
+
+```
+# Planner creates a task with worktree isolation
+task_create({
+  title: "Major refactor",
+  complexity: "complex",
+  isolation: "worktree"
+})
+
+# Launch implementer with worktree isolation
+launch_implementer({
+  name: "impl-1",
+  type: "claude",
+  isolation: "worktree"
+})
+```
+
+When using worktrees:
+- Each implementer gets their own branch (e.g., `lockstep/impl-1`)
+- No file locks needed - full isolation
+- Implementers commit changes frequently
+- Planner uses `worktree_status` to check progress
+- Planner uses `worktree_merge` to merge approved changes
+
+Best practices:
+- **Shared isolation** (default): Simple/medium tasks, quick edits
+- **Worktree isolation**: Complex refactoring, parallel features, tasks that touch many files
+
 ---
 
 ## Disabling Lockstep
@@ -360,10 +431,16 @@ lockstep-mcp dashboard
 Then open http://127.0.0.1:8787 in a browser.
 
 The dashboard shows:
-- All tasks and their status
-- Active file locks
-- Recent notes
-- Configuration details
+- **Project status** - Dynamic status (in progress, paused, complete)
+- **All tasks** - With status, complexity, isolation mode, and owner
+- **Implementers** - With current task, review queue, and completion stats
+- **Active file locks** - Who has what locked
+- **Recent notes** - Inter-agent communication
+
+**Interactive features:**
+- Click on active implementer cards to focus their Terminal window (macOS)
+- Real-time updates via WebSocket
+- Auto-detects dead implementer processes
 
 ---
 

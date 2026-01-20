@@ -2,6 +2,24 @@
 
 Lockstep MCP is a multi-agent coordination server that enables Claude, Codex, and other AI agents to work together on the same project without conflicts. It provides shared state (tasks, locks, notes) so agents can coordinate their work.
 
+## Quick Start
+
+```bash
+# Install (one-time)
+git clone https://github.com/Tmmoore286/lockstep-mcp.git ~/lockstep-mcp
+cd ~/lockstep-mcp && npm install && npm run build && npm link
+lockstep-mcp install --all
+
+# Enable in your project
+cd /path/to/your/project
+lockstep-mcp init
+
+# Start the dashboard (optional)
+lockstep-mcp dashboard
+```
+
+Then tell Claude "you're the planner" and Codex "you're the implementer".
+
 ## Features
 
 - **Task Management** - Create, assign, and track tasks with complexity levels and review workflow

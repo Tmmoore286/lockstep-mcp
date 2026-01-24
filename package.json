@@ -12,6 +12,7 @@
   },
   "files": [
     "dist",
+    "!dist/**/*.test.js",
     "README.md",
     "LICENSE"
   ],

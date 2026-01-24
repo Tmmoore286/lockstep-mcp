@@ -568,6 +568,28 @@ Run `npm link` in the lockstep-mcp directory, or use the full path:
 node /path/to/lockstep-mcp/dist/cli.js status
 ```
 
+### SQLite installation fails (node-gyp errors)
+
+Lockstep uses SQLite for coordination state. Prebuilt binaries are available for most platforms (macOS, Windows, Linux on x64/arm64), but if you see compilation errors:
+
+**Option 1: Install build tools**
+```bash
+# macOS
+xcode-select --install
+
+# Ubuntu/Debian
+sudo apt-get install build-essential python3
+
+# Windows (run as admin)
+npm install -g windows-build-tools
+```
+
+**Option 2: Use JSON storage instead**
+```bash
+lockstep-mcp install --all --storage json
+```
+JSON storage works without native dependencies but is slightly slower for large projects.
+
 ### Agent doesn't see lockstep tools
 
 1. Check installation: `lockstep-mcp status`

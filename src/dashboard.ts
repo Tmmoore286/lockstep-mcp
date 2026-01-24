@@ -490,8 +490,182 @@ const DASHBOARD_HTML = `<!doctype html>
         .panel.wide, .panel.full { grid-column: span 1; }
       }
 
+      /* Progress Bar */
+      .progress-section {
+        padding: 0 32px 16px;
+        display: flex;
+        align-items: center;
+        gap: 16px;
+      }
+
+      .progress-bar-container {
+        flex: 1;
+        height: 8px;
+        background: var(--bg-card);
+        border-radius: 4px;
+        overflow: hidden;
+        border: 1px solid var(--border);
+      }
+
+      .progress-bar {
+        height: 100%;
+        background: linear-gradient(90deg, var(--green-dim) 0%, var(--green) 100%);
+        border-radius: 4px;
+        transition: width 0.3s ease;
+        width: 0%;
+      }
+
+      .progress-text {
+        font-size: 12px;
+        font-weight: 500;
+        color: var(--text-secondary);
+        min-width: 100px;
+        text-align: right;
+      }
+
+      /* Activity Feed */
+      .activity-item {
+        display: flex;
+        align-items: flex-start;
+        gap: 10px;
+        padding: 10px 12px;
+        background: var(--bg-card);
+        border-radius: 6px;
+        border-left: 3px solid var(--border);
+      }
+
+      .activity-item.task-claimed { border-left-color: var(--blue); }
+      .activity-item.task-completed { border-left-color: var(--green); }
+      .activity-item.task-review { border-left-color: var(--violet); }
+      .activity-item.lock-acquired { border-left-color: var(--orange); }
+      .activity-item.lock-released { border-left-color: var(--text-muted); }
+
+      .activity-icon {
+        width: 20px;
+        height: 20px;
+        border-radius: 50%;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 10px;
+        flex-shrink: 0;
+      }
+
+      .activity-icon.claim { background: var(--blue-glow); color: var(--blue); }
+      .activity-icon.complete { background: var(--green-glow); color: var(--green); }
+      .activity-icon.review { background: var(--violet-glow); color: var(--violet); }
+      .activity-icon.lock { background: var(--orange-glow); color: var(--orange); }
+
+      .activity-content {
+        flex: 1;
+        min-width: 0;
+      }
+
+      .activity-text {
+        font-size: 12px;
+        color: var(--text-secondary);
+        line-height: 1.4;
+      }
+
+      .activity-text strong {
+        color: var(--text-primary);
+        font-weight: 500;
+      }
+
+      .activity-time {
+        font-size: 10px;
+        color: var(--text-muted);
+        font-family: "JetBrains Mono", monospace;
+        margin-top: 2px;
+      }
+
+      /* Filter Bar */
+      .filter-bar {
+        display: flex;
+        gap: 8px;
+        padding: 12px;
+        border-bottom: 1px solid var(--border);
+        flex-wrap: wrap;
+      }
+
+      .filter-btn {
+        padding: 6px 12px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 500;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .filter-btn:hover {
+        border-color: var(--border-light);
+        color: var(--text-primary);
+      }
+
+      .filter-btn.active {
+        background: var(--blue-glow);
+        border-color: var(--blue);
+        color: var(--blue);
+      }
+
+      .filter-btn.active.green {
+        background: var(--green-glow);
+        border-color: var(--green);
+        color: var(--green);
+      }
+
+      /* Toggle Switch */
+      .toggle-container {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 8px 12px;
+        border-bottom: 1px solid var(--border);
+      }
+
+      .toggle-label {
+        font-size: 11px;
+        color: var(--text-muted);
+      }
+
+      .toggle {
+        width: 36px;
+        height: 20px;
+        background: var(--bg-hover);
+        border-radius: 10px;
+        position: relative;
+        cursor: pointer;
+        transition: background 0.2s ease;
+        border: 1px solid var(--border);
+      }
+
+      .toggle.active {
+        background: var(--blue-glow);
+        border-color: var(--blue);
+      }
+
+      .toggle::after {
+        content: "";
+        position: absolute;
+        width: 14px;
+        height: 14px;
+        border-radius: 50%;
+        background: var(--text-muted);
+        top: 2px;
+        left: 2px;
+        transition: all 0.2s ease;
+      }
+
+      .toggle.active::after {
+        left: 18px;
+        background: var(--blue);
+      }
+
       @media (max-width: 640px) {
-        header, .stats, .grid, footer { padding-left: 16px; padding-right: 16px; }
+        header, .stats, .grid, footer, .progress-section { padding-left: 16px; padding-right: 16px; }
         .stats { grid-template-columns: 1fr; }
       }
     </style>
@@ -519,9 +693,16 @@ const DASHBOARD_HTML = `<!doctype html>
         <div class="value" id="implementer-count">0</div>
       </div>
       <div class="stat">
-        <div class="label">File Locks</div>
+        <div class="label">Active Locks</div>
         <div class="value" id="lock-count">0</div>
       </div>
+    </section>
+
+    <section class="progress-section">
+      <div class="progress-bar-container">
+        <div class="progress-bar" id="progress-bar"></div>
+      </div>
+      <div class="progress-text" id="progress-text">0% complete</div>
     </section>
 
     <section class="grid">
@@ -545,6 +726,10 @@ const DASHBOARD_HTML = `<!doctype html>
           <h2>Locks</h2>
           <span class="pill orange" id="lock-meta">0 active</span>
         </div>
+        <div class="toggle-container">
+          <span class="toggle-label">Show resolved</span>
+          <div class="toggle" id="show-resolved-toggle"></div>
+        </div>
         <div class="list" id="lock-list"></div>
       </div>
       <div class="panel wide">
@@ -552,9 +737,22 @@ const DASHBOARD_HTML = `<!doctype html>
           <h2>Tasks</h2>
           <span class="pill blue" id="task-meta">0 total</span>
         </div>
+        <div class="filter-bar">
+          <button class="filter-btn active" data-filter="all">All</button>
+          <button class="filter-btn" data-filter="in_progress">In Progress</button>
+          <button class="filter-btn" data-filter="review">Review</button>
+          <button class="filter-btn" data-filter="todo">Todo</button>
+          <button class="filter-btn green" data-filter="done">Done</button>
+        </div>
         <div class="list" id="task-list"></div>
       </div>
       <div class="panel">
+        <div class="panel-header">
+          <h2>Activity</h2>
+        </div>
+        <div class="list" id="activity-list"></div>
+      </div>
+      <div class="panel full">
         <div class="panel-header">
           <h2>Notes</h2>
         </div>
@@ -576,12 +774,41 @@ const DASHBOARD_HTML = `<!doctype html>
       const taskList = document.getElementById("task-list");
       const lockList = document.getElementById("lock-list");
       const noteList = document.getElementById("note-list");
+      const activityList = document.getElementById("activity-list");
       const taskCount = document.getElementById("task-count");
       const implementerCount = document.getElementById("implementer-count");
       const lockCount = document.getElementById("lock-count");
       const taskMeta = document.getElementById("task-meta");
       const lockMeta = document.getElementById("lock-meta");
       const implMeta = document.getElementById("impl-meta");
+      const progressBar = document.getElementById("progress-bar");
+      const progressText = document.getElementById("progress-text");
+      const showResolvedToggle = document.getElementById("show-resolved-toggle");
+      const filterBtns = document.querySelectorAll(".filter-btn");
+
+      // State
+      let showResolvedLocks = false;
+      let currentTaskFilter = "all";
+      let allTasks = [];
+      let allLocks = [];
+      let activityLog = [];
+
+      // Toggle resolved locks
+      showResolvedToggle.addEventListener("click", () => {
+        showResolvedLocks = !showResolvedLocks;
+        showResolvedToggle.classList.toggle("active", showResolvedLocks);
+        renderLocks(allLocks);
+      });
+
+      // Task filter buttons
+      filterBtns.forEach(btn => {
+        btn.addEventListener("click", () => {
+          filterBtns.forEach(b => b.classList.remove("active"));
+          btn.classList.add("active");
+          currentTaskFilter = btn.dataset.filter;
+          renderTasks(allTasks);
+        });
+      });
 
       function escapeHtml(text) {
         const map = {
@@ -600,14 +827,23 @@ const DASHBOARD_HTML = `<!doctype html>
       }
 
       function renderTasks(tasks) {
+        allTasks = tasks; // Store for filtering
         taskList.innerHTML = "";
-        if (!tasks.length) {
-          taskList.innerHTML = '<div class="empty">No tasks yet</div>';
+
+        // Apply filter
+        let filtered = tasks;
+        if (currentTaskFilter !== "all") {
+          filtered = tasks.filter(t => t.status === currentTaskFilter);
+        }
+
+        if (!filtered.length) {
+          const msg = currentTaskFilter === "all" ? "No tasks yet" : "No " + currentTaskFilter.replace("_", " ") + " tasks";
+          taskList.innerHTML = '<div class="empty">' + msg + '</div>';
           return;
         }
         // Sort: in_progress first, then review, then todo, then done
         const order = { in_progress: 0, review: 1, todo: 2, done: 3 };
-        const sorted = [...tasks].sort((a, b) => (order[a.status] || 99) - (order[b.status] || 99));
+        const sorted = [...filtered].sort((a, b) => (order[a.status] || 99) - (order[b.status] || 99));
         sorted.forEach(task => {
           const card = document.createElement("div");
           card.className = "card";
@@ -635,12 +871,26 @@ const DASHBOARD_HTML = `<!doctype html>
       }
 
       function renderLocks(locks) {
+        allLocks = locks; // Store for toggle
         lockList.innerHTML = "";
-        if (!locks.length) {
-          lockList.innerHTML = '<div class="empty">No active locks</div>';
+
+        // Filter based on toggle
+        let filtered = showResolvedLocks ? locks : locks.filter(l => l.status === "active");
+
+        if (!filtered.length) {
+          const msg = showResolvedLocks ? "No locks" : "No active locks";
+          lockList.innerHTML = '<div class="empty">' + msg + '</div>';
           return;
         }
-        locks.forEach(lock => {
+
+        // Sort: active first, then by updatedAt desc
+        filtered = [...filtered].sort((a, b) => {
+          if (a.status === "active" && b.status !== "active") return -1;
+          if (a.status !== "active" && b.status === "active") return 1;
+          return b.updatedAt.localeCompare(a.updatedAt);
+        });
+
+        filtered.forEach(lock => {
           const card = document.createElement("div");
           card.className = "card";
           const fileName = lock.path.split('/').pop();
@@ -674,6 +924,90 @@ const DASHBOARD_HTML = `<!doctype html>
             '<div class="note-text">' + escapeHtml(note.text) + '</div>' +
             '<div class="note-time">' + formatTime(note.createdAt) + '</div>';
           noteList.appendChild(card);
+        });
+      }
+
+      // Track previous state for activity detection
+      let prevTaskStates = {};
+      let prevLockStates = {};
+
+      function detectActivity(tasks, locks) {
+        const newActivities = [];
+        const now = new Date().toISOString();
+
+        // Detect task state changes
+        tasks.forEach(task => {
+          const prev = prevTaskStates[task.id];
+          if (prev && prev !== task.status) {
+            if (task.status === "in_progress" && prev === "todo") {
+              newActivities.push({
+                type: "task-claimed",
+                icon: "claim",
+                text: '<strong>' + escapeHtml(task.owner || "Someone") + '</strong> claimed <strong>' + escapeHtml(task.title) + '</strong>',
+                time: now
+              });
+            } else if (task.status === "done") {
+              newActivities.push({
+                type: "task-completed",
+                icon: "complete",
+                text: '<strong>' + escapeHtml(task.title) + '</strong> completed',
+                time: now
+              });
+            } else if (task.status === "review") {
+              newActivities.push({
+                type: "task-review",
+                icon: "review",
+                text: '<strong>' + escapeHtml(task.title) + '</strong> submitted for review',
+                time: now
+              });
+            }
+          }
+          prevTaskStates[task.id] = task.status;
+        });
+
+        // Detect lock changes
+        locks.forEach(lock => {
+          const prev = prevLockStates[lock.path];
+          if (!prev && lock.status === "active") {
+            newActivities.push({
+              type: "lock-acquired",
+              icon: "lock",
+              text: '<strong>' + escapeHtml(lock.owner || "Someone") + '</strong> locked <strong>' + escapeHtml(lock.path.split("/").pop()) + '</strong>',
+              time: now
+            });
+          } else if (prev === "active" && lock.status === "resolved") {
+            newActivities.push({
+              type: "lock-released",
+              icon: "lock",
+              text: '<strong>' + escapeHtml(lock.path.split("/").pop()) + '</strong> released',
+              time: now
+            });
+          }
+          prevLockStates[lock.path] = lock.status;
+        });
+
+        // Add to activity log (keep last 50)
+        activityLog = [...newActivities, ...activityLog].slice(0, 50);
+      }
+
+      function renderActivity() {
+        activityList.innerHTML = "";
+        if (!activityLog.length) {
+          activityList.innerHTML = '<div class="empty">No recent activity</div>';
+          return;
+        }
+        activityLog.slice(0, 15).forEach(activity => {
+          const item = document.createElement("div");
+          item.className = "activity-item " + activity.type;
+          item.innerHTML =
+            '<div class="activity-icon ' + activity.icon + '">' +
+            (activity.icon === "claim" ? "→" : activity.icon === "complete" ? "✓" : activity.icon === "review" ? "?" : "🔒") +
+            '</div>' +
+            '<div class="activity-content">' +
+            '<div class="activity-text">' + activity.text + '</div>' +
+            '<div class="activity-time">' + formatTime(activity.time) + '</div>' +
+            '</div>';
+          activityList.appendChild(item);
         });
       }
 
@@ -818,18 +1152,30 @@ const DASHBOARD_HTML = `<!doctype html>
 
       function updateState(state, config, projectContext, implementers) {
         taskCount.textContent = state.tasks.length;
-        lockCount.textContent = state.locks.length;
+        const activeLocks = state.locks.filter(lock => lock.status === "active").length;
+        lockCount.textContent = activeLocks; // Show ACTIVE locks only
         const activeImpls = (implementers || []).filter(i => i.status === "active").length;
         implementerCount.textContent = activeImpls;
 
         const todoTasks = state.tasks.filter(t => t.status === "todo").length;
         const inProgressTasks = state.tasks.filter(t => t.status === "in_progress").length;
+        const reviewTasks = state.tasks.filter(t => t.status === "review").length;
         const doneTasks = state.tasks.filter(t => t.status === "done").length;
-        taskMeta.textContent = todoTasks + " todo / " + inProgressTasks + " active / " + doneTasks + " done";
+        taskMeta.textContent = todoTasks + " todo / " + inProgressTasks + " active / " + reviewTasks + " review / " + doneTasks + " done";
 
-        const activeLocks = state.locks.filter(lock => lock.status === "active").length;
-        lockMeta.textContent = activeLocks + " active";
+        lockMeta.textContent = activeLocks + " active" + (state.locks.length > activeLocks ? " / " + state.locks.length + " total" : "");
         implMeta.textContent = activeImpls + " active";
+
+        // Update progress bar
+        const totalTasks = state.tasks.length;
+        const completedTasks = doneTasks;
+        const progressPercent = totalTasks > 0 ? Math.round((completedTasks / totalTasks) * 100) : 0;
+        progressBar.style.width = progressPercent + "%";
+        progressText.textContent = progressPercent + "% complete (" + completedTasks + "/" + totalTasks + ")";
+
+        // Detect activity changes
+        detectActivity(state.tasks, state.locks);
+        renderActivity();
 
         renderProjectContext(projectContext, state.tasks, implementers);
         renderImplementers(implementers, state.tasks);
@@ -906,7 +1252,8 @@ export async function startDashboard(options: DashboardOptions = {}) {
 
   const port = options.port ?? 8787;
   const host = options.host ?? "127.0.0.1";
-  const pollMs = options.pollMs ?? 1500;
+  const pollMsIdle = options.pollMs ?? 1500;
+  const pollMsActive = 500; // Faster polling during active work
 
   const server = http.createServer(async (req, res) => {
     const parsed = url.parse(req.url || "");
@@ -1019,6 +1366,9 @@ export async function startDashboard(options: DashboardOptions = {}) {
   });
 
   let lastHash = "";
+  let lastActiveCount = 0;
+  let pollInterval: ReturnType<typeof setInterval> | null = null;
+
   const poll = async () => {
     const state = await store.status();
     const allContexts = await store.listAllProjectContexts();
@@ -1027,6 +1377,26 @@ export async function startDashboard(options: DashboardOptions = {}) {
       : null;
     const rawImplementers = await store.listImplementers();
     const implementers = await cleanupDeadImplementers(store, rawImplementers);
+
+    // Check if we should use fast or slow polling
+    const activeImpls = implementers.filter(i => i.status === "active").length;
+    const activeTasks = state.tasks.filter(t => t.status === "in_progress" || t.status === "review").length;
+    const activeLocks = state.locks.filter(l => l.status === "active").length;
+    const isActive = activeImpls > 0 || activeTasks > 0 || activeLocks > 0;
+
+    // Adjust poll interval if activity level changed
+    if ((isActive && lastActiveCount === 0) || (!isActive && lastActiveCount > 0)) {
+      const newPollMs = isActive ? pollMsActive : pollMsIdle;
+      if (pollInterval) {
+        clearInterval(pollInterval);
+      }
+      pollInterval = setInterval(() => {
+        poll().catch(() => undefined);
+      }, newPollMs);
+      console.log(`Poll interval: ${newPollMs}ms (${isActive ? "active" : "idle"})`);
+    }
+    lastActiveCount = isActive ? 1 : 0;
+
     const next = JSON.stringify({ state, projectContext, implementers });
     if (next !== lastHash) {
       lastHash = next;
@@ -1048,9 +1418,10 @@ export async function startDashboard(options: DashboardOptions = {}) {
   };
 
   await poll();
-  setInterval(() => {
+  // Start with idle polling, will switch to active if needed
+  pollInterval = setInterval(() => {
     poll().catch(() => undefined);
-  }, pollMs);
+  }, pollMsIdle);
 
   server.listen(port, host, () => {
     process.stdout.write(`Dashboard running at http://${host}:${port}\n`);

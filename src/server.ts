@@ -290,8 +290,30 @@ const tools = [
     },
   },
   {
+    name: "task_approve_batch",
+    description: "PLANNER ONLY: Approve multiple tasks at once. More efficient than approving one by one.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        ids: { type: "array", items: { type: "string" }, description: "Array of task IDs to approve" },
+        feedback: { type: "string", description: "Optional feedback for all approved tasks" },
+      },
+      required: ["ids"],
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "task_summary",
+    description: "Get task counts by status. Lighter than task_list - use when you just need to know how many tasks are in each state.",
+    inputSchema: {
+      type: "object",
+      properties: {},
+      additionalProperties: false,
+    },
+  },
+  {
     name: "task_list",
-    description: "List tasks with optional filters",
+    description: "List tasks with optional filters. For active work, defaults to excluding done tasks to reduce response size. Use includeDone=true or status='done' to see completed tasks.",
     inputSchema: {
       type: "object",
       properties: {
@@ -299,6 +321,8 @@ const tools = [
         owner: { type: "string" },
         tag: { type: "string" },
         limit: { type: "number" },
+        includeDone: { type: "boolean", description: "Include done tasks in results (default: false for smaller responses)" },
+        offset: { type: "number", description: "Skip first N tasks (for pagination)" },
       },
       additionalProperties: false,
     },
@@ -538,11 +562,11 @@ const tools = [
       type: "object",
       properties: {
         type: { type: "string", enum: ["claude", "codex"], description: "Type of agent to launch" },
-        name: { type: "string", description: "Name for this implementer (e.g., 'impl-1')" },
+        name: { type: "string", description: "Name for this implementer (e.g., 'impl-1'). If not provided, auto-generates as 'impl-N'" },
         projectRoot: { type: "string", description: "Project root path (defaults to first configured root)" },
         isolation: { type: "string", enum: ["shared", "worktree"], description: "shared=work in main directory, worktree=create isolated git worktree. Default: shared" },
       },
-      required: ["type", "name"],
+      required: ["type"],
       additionalProperties: false,
     },
   },
@@ -907,21 +931,127 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           _instruction: `Changes requested by planner: ${feedback}. Task returned to in_progress.`
         });
       }
+      case "task_approve_batch": {
+        const ids = getStringArray(args.ids);
+        if (!ids || ids.length === 0) throw new Error("ids array is required and must not be empty");
+        const feedback = getString(args.feedback);
+
+        const results: Array<{ id: string; success: boolean; title?: string; error?: string }> = [];
+
+        for (const id of ids) {
+          try {
+            const task = await store.approveTask({ id, feedback });
+            results.push({ id, success: true, title: task.title });
+
+            // Notify for each task
+            await store.appendNote({
+              text: `[APPROVED] Task "${task.title}" approved by planner.${feedback ? ` Feedback: ${feedback}` : ""}`,
+              author: "system"
+            });
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "Unknown error";
+            results.push({ id, success: false, error: message });
+          }
+        }
+
+        // Check if all tasks are now complete
+        const todoTasks = await store.listTasks({ status: "todo" });
+        const inProgressTasks = await store.listTasks({ status: "in_progress" });
+        const reviewTasks = await store.listTasks({ status: "review" });
+        if (todoTasks.length === 0 && inProgressTasks.length === 0 && reviewTasks.length === 0) {
+          await store.appendNote({
+            text: "[SYSTEM] ALL TASKS COMPLETE! Planner: review the work and call project_status_set({ status: 'complete' }) if satisfied, or create more tasks.",
+            author: "system"
+          });
+        }
+
+        const successCount = results.filter(r => r.success).length;
+        return jsonResponse({
+          total: ids.length,
+          approved: successCount,
+          failed: ids.length - successCount,
+          results,
+          _instruction: successCount === ids.length
+            ? `All ${successCount} tasks approved successfully.`
+            : `Approved ${successCount}/${ids.length} tasks. Check results for failures.`
+        });
+      }
+      case "task_summary": {
+        const allTasks = await store.listTasks({});
+        const summary = {
+          total: allTasks.length,
+          todo: allTasks.filter(t => t.status === "todo").length,
+          in_progress: allTasks.filter(t => t.status === "in_progress").length,
+          blocked: allTasks.filter(t => t.status === "blocked").length,
+          review: allTasks.filter(t => t.status === "review").length,
+          done: allTasks.filter(t => t.status === "done").length,
+        };
+
+        // Calculate completion percentage
+        const completionPercent = summary.total > 0
+          ? Math.round((summary.done / summary.total) * 100)
+          : 0;
+
+        // Get project status
+        const projectRoot = config.roots[0] ?? process.cwd();
+        const context = await store.getProjectContext(projectRoot);
+
+        return jsonResponse({
+          summary,
+          completionPercent,
+          projectStatus: context?.status ?? "unknown",
+          _hint: summary.review > 0
+            ? `${summary.review} task(s) pending review - use task_list({ status: "review" }) to see them`
+            : summary.todo === 0 && summary.in_progress === 0 && summary.review === 0 && summary.total > 0
+              ? "All tasks complete!"
+              : undefined
+        });
+      }
       case "task_list": {
-        const tasks = await store.listTasks({
-          status: getString(args.status) as "todo" | "in_progress" | "blocked" | "review" | "done" | undefined,
+        const statusFilter = getString(args.status) as "todo" | "in_progress" | "blocked" | "review" | "done" | undefined;
+        const includeDone = getBoolean(args.includeDone) ?? false;
+        const offset = getNumber(args.offset) ?? 0;
+        const limit = getNumber(args.limit);
+
+        let tasks = await store.listTasks({
+          status: statusFilter,
           owner: getString(args.owner),
           tag: getString(args.tag),
-          limit: getNumber(args.limit),
+          limit: undefined, // We'll handle pagination ourselves
         });
+
+        // If no specific status filter and includeDone is false, exclude done tasks for smaller responses
+        if (!statusFilter && !includeDone) {
+          tasks = tasks.filter(t => t.status !== "done");
+        }
+
+        // Apply pagination
+        const totalBeforePagination = tasks.length;
+        if (offset > 0) {
+          tasks = tasks.slice(offset);
+        }
+        if (limit !== undefined && limit > 0) {
+          tasks = tasks.slice(0, limit);
+        }
+
         // Include project status so implementers can check if they should stop
         const projectRoot = config.roots[0] ?? process.cwd();
         const context = await store.getProjectContext(projectRoot);
+
+        // Get counts for summary
+        const allTasks = await store.listTasks({});
+        const doneTasks = allTasks.filter(t => t.status === "done").length;
+
         return jsonResponse({
           tasks,
+          total: totalBeforePagination,
+          offset,
+          hasMore: offset + tasks.length < totalBeforePagination,
+          doneCount: doneTasks,
           projectStatus: context?.status ?? "unknown",
           _hint: context?.status === "stopped" ? "PROJECT STOPPED - cease work immediately" :
-                 context?.status === "complete" ? "PROJECT COMPLETE - no more work needed" : undefined
+                 context?.status === "complete" ? "PROJECT COMPLETE - no more work needed" :
+                 (!includeDone && doneTasks > 0) ? `${doneTasks} done task(s) hidden. Use includeDone=true or task_summary to see counts.` : undefined
         });
       }
       case "lock_acquire": {
@@ -1318,11 +1448,25 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
       }
       case "launch_implementer": {
         const type = getString(args.type) as "claude" | "codex" | undefined;
-        const name = getString(args.name);
-        if (!type || !name) {
-          throw new Error("type and name are required");
+        if (!type) {
+          throw new Error("type is required");
         }
         const projectRoot = getString(args.projectRoot) ?? config.roots[0] ?? process.cwd();
+
+        // Auto-generate name if not provided
+        let name = getString(args.name);
+        if (!name) {
+          const existingImplementers = await store.listImplementers(projectRoot);
+          // Find the highest impl-N number
+          let maxNum = 0;
+          for (const impl of existingImplementers) {
+            const match = impl.name.match(/^impl-(\d+)$/);
+            if (match) {
+              maxNum = Math.max(maxNum, parseInt(match[1], 10));
+            }
+          }
+          name = `impl-${maxNum + 1}`;
+        }
         const isolation = getString(args.isolation) as "shared" | "worktree" | undefined ?? "shared";
 
         // Check if this is the first implementer - if so, launch dashboard too

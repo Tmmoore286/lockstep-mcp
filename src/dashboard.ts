@@ -715,6 +715,117 @@ const DASHBOARD_HTML = `<!doctype html>
         color: white;
       }
 
+      /* Card Action Buttons */
+      .card-actions {
+        display: flex;
+        gap: 6px;
+        margin-top: 10px;
+        padding-top: 10px;
+        border-top: 1px solid var(--border);
+      }
+
+      .action-btn {
+        padding: 5px 10px;
+        border-radius: 4px;
+        font-size: 10px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        border: 1px solid var(--border);
+        background: var(--bg-hover);
+        color: var(--text-secondary);
+      }
+
+      .action-btn:hover {
+        border-color: var(--border-light);
+        color: var(--text-primary);
+      }
+
+      .action-btn.approve {
+        border-color: var(--green-dim);
+        color: var(--green);
+        background: var(--green-glow);
+      }
+
+      .action-btn.approve:hover {
+        background: var(--green);
+        color: white;
+      }
+
+      .action-btn.reject {
+        border-color: var(--orange);
+        color: var(--orange);
+        background: var(--orange-glow);
+      }
+
+      .action-btn.reject:hover {
+        background: var(--orange);
+        color: white;
+      }
+
+      .action-btn.danger {
+        border-color: var(--red);
+        color: var(--red);
+        background: var(--red-glow);
+      }
+
+      .action-btn.danger:hover {
+        background: var(--red);
+        color: white;
+      }
+
+      .action-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* Header Controls */
+      .header-controls {
+        display: flex;
+        align-items: center;
+        gap: 12px;
+      }
+
+      .control-btn {
+        padding: 8px 14px;
+        border-radius: 6px;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+        border: 1px solid var(--border);
+        background: var(--bg-card);
+        color: var(--text-secondary);
+      }
+
+      .control-btn:hover {
+        border-color: var(--border-light);
+        color: var(--text-primary);
+      }
+
+      .control-btn.stop {
+        border-color: var(--orange);
+        color: var(--orange);
+      }
+
+      .control-btn.stop:hover {
+        background: var(--orange-glow);
+      }
+
+      .control-btn.complete {
+        border-color: var(--green-dim);
+        color: var(--green);
+      }
+
+      .control-btn.complete:hover {
+        background: var(--green-glow);
+      }
+
+      .control-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
       /* Toggle Switch */
       .toggle-container {
         display: flex;
@@ -771,7 +882,9 @@ const DASHBOARD_HTML = `<!doctype html>
   <body>
     <header>
       <h1>Lockstep MCP</h1>
-      <div style="display: flex; align-items: center; gap: 16px;">
+      <div class="header-controls">
+        <button class="control-btn stop" id="stop-all-btn" title="Stop all implementers">⏹ Stop All</button>
+        <button class="control-btn complete" id="complete-btn" title="Mark project complete">✓ Complete</button>
         <button class="reset-btn" id="reset-btn" title="Reset session for fresh start">Reset Session</button>
         <div class="status-badge" id="status-badge">
           <div class="status-dot" id="status-dot"></div>
@@ -980,6 +1093,97 @@ const DASHBOARD_HTML = `<!doctype html>
         }
       }
 
+      // Stop All Implementers button
+      const stopAllBtn = document.getElementById("stop-all-btn");
+      stopAllBtn.addEventListener("click", async () => {
+        if (!confirm("Stop all active implementers?")) return;
+        stopAllBtn.disabled = true;
+        try {
+          const response = await fetch("/api/stop-all", { method: "POST" });
+          const result = await response.json();
+          if (result.success) {
+            await fetchState();
+          } else {
+            alert("Failed: " + (result.error || "Unknown error"));
+          }
+        } catch (err) {
+          alert("Failed: " + err.message);
+        } finally {
+          stopAllBtn.disabled = false;
+        }
+      });
+
+      // Mark Project Complete button
+      const completeBtn = document.getElementById("complete-btn");
+      completeBtn.addEventListener("click", async () => {
+        if (!confirm("Mark project as complete? This will signal all implementers to stop.")) return;
+        completeBtn.disabled = true;
+        try {
+          const response = await fetch("/api/complete", { method: "POST" });
+          const result = await response.json();
+          if (result.success) {
+            await fetchState();
+          } else {
+            alert("Failed: " + (result.error || "Unknown error"));
+          }
+        } catch (err) {
+          alert("Failed: " + err.message);
+        } finally {
+          completeBtn.disabled = false;
+        }
+      });
+
+      // Task actions (approve/reject)
+      async function approveTask(taskId) {
+        try {
+          const response = await fetch("/api/task/" + encodeURIComponent(taskId) + "/approve", { method: "POST" });
+          const result = await response.json();
+          if (result.success) {
+            await fetchState();
+          } else {
+            alert("Failed: " + (result.error || "Unknown error"));
+          }
+        } catch (err) {
+          alert("Failed: " + err.message);
+        }
+      }
+
+      async function rejectTask(taskId) {
+        const feedback = prompt("What changes are needed?");
+        if (!feedback) return;
+        try {
+          const response = await fetch("/api/task/" + encodeURIComponent(taskId) + "/reject", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ feedback })
+          });
+          const result = await response.json();
+          if (result.success) {
+            await fetchState();
+          } else {
+            alert("Failed: " + (result.error || "Unknown error"));
+          }
+        } catch (err) {
+          alert("Failed: " + err.message);
+        }
+      }
+
+      // Kill specific implementer
+      async function killImplementer(implId, implName) {
+        if (!confirm("Stop implementer '" + implName + "'?")) return;
+        try {
+          const response = await fetch("/api/implementer/" + encodeURIComponent(implId) + "/stop", { method: "POST" });
+          const result = await response.json();
+          if (result.success) {
+            await fetchState();
+          } else {
+            alert("Failed: " + (result.error || "Unknown error"));
+          }
+        } catch (err) {
+          alert("Failed: " + err.message);
+        }
+      }
+
       function escapeHtml(text) {
         const map = {
           '&': '&amp;',
@@ -1024,6 +1228,14 @@ const DASHBOARD_HTML = `<!doctype html>
           const isolationTag = task.isolation === "worktree"
             ? '<span class="tag worktree">worktree</span>'
             : '';
+          // Show review notes if in review status
+          const reviewNotes = task.status === "review" && task.reviewNotes
+            ? '<div class="card-desc" style="margin-top: 8px; padding-top: 8px; border-top: 1px solid var(--border);"><strong>Review notes:</strong> ' + escapeHtml(task.reviewNotes.substring(0, 200)) + (task.reviewNotes.length > 200 ? '...' : '') + '</div>'
+            : '';
+          // Add action buttons for review tasks
+          const actions = task.status === "review"
+            ? '<div class="card-actions"><button class="action-btn approve" data-task-id="' + task.id + '">✓ Approve</button><button class="action-btn reject" data-task-id="' + task.id + '">✗ Request Changes</button></div>'
+            : '';
           card.innerHTML =
             '<div class="card-title">' +
             '<span class="tag ' + task.status + '">' + task.status.replace('_', ' ') + '</span>' +
@@ -1035,7 +1247,28 @@ const DASHBOARD_HTML = `<!doctype html>
             (task.complexity ? '<span class="tag">' + task.complexity + '</span>' : '') +
             isolationTag +
             '<span class="mono">' + formatTime(task.updatedAt) + '</span>' +
-            "</div>";
+            "</div>" +
+            reviewNotes +
+            actions;
+
+          // Add event listeners for action buttons
+          if (task.status === "review") {
+            const approveBtn = card.querySelector(".action-btn.approve");
+            const rejectBtn = card.querySelector(".action-btn.reject");
+            if (approveBtn) {
+              approveBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                approveTask(task.id);
+              });
+            }
+            if (rejectBtn) {
+              rejectBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                rejectTask(task.id);
+              });
+            }
+          }
+
           taskList.appendChild(card);
         });
       }
@@ -1302,6 +1535,11 @@ const DASHBOARD_HTML = `<!doctype html>
             tasksHtml += '</div>';
           }
 
+          // Add stop button for active implementers
+          const actionsHtml = isActive
+            ? '<div class="card-actions"><button class="action-btn danger" data-impl-id="' + impl.id + '" data-impl-name="' + escapeHtml(impl.name) + '">⏹ Stop</button></div>'
+            : '';
+
           card.innerHTML =
             '<div class="card-title">' +
             '<span class="tag ' + impl.status + '">' + impl.status + '</span>' +
@@ -1312,9 +1550,23 @@ const DASHBOARD_HTML = `<!doctype html>
             isolationHtml +
             '<span class="mono">' + formatTime(impl.createdAt) + '</span>' +
             "</div>" +
-            tasksHtml;
+            tasksHtml +
+            actionsHtml;
+
           if (isActive) {
-            card.addEventListener("click", () => focusImplementer(impl.id));
+            // Add click to focus (but not on the stop button)
+            card.addEventListener("click", (e) => {
+              if (e.target.closest(".action-btn")) return;
+              focusImplementer(impl.id);
+            });
+            // Add stop button handler
+            const stopBtn = card.querySelector(".action-btn.danger");
+            if (stopBtn) {
+              stopBtn.addEventListener("click", (e) => {
+                e.stopPropagation();
+                killImplementer(impl.id, impl.name);
+              });
+            }
           }
           implementerList.appendChild(card);
         });
@@ -1477,6 +1729,152 @@ export async function startDashboard(options: DashboardOptions = {}) {
           res.end(JSON.stringify({ success: false, error: message }));
         }
       });
+      return;
+    }
+
+    // Handle stop all implementers API
+    if (parsed.pathname === "/api/stop-all" && req.method === "POST") {
+      try {
+        const implementers = await store.listImplementers();
+        let stoppedCount = 0;
+
+        for (const impl of implementers) {
+          if (impl.status === "active") {
+            // Try to kill the process if we have a PID
+            if (impl.pid) {
+              try {
+                process.kill(impl.pid, "SIGTERM");
+              } catch {
+                // Process may already be dead
+              }
+            }
+            await store.updateImplementer(impl.id, "stopped");
+            stoppedCount++;
+          }
+        }
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true, stoppedCount }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: message }));
+      }
+      return;
+    }
+
+    // Handle mark project complete API
+    if (parsed.pathname === "/api/complete" && req.method === "POST") {
+      try {
+        const projectRoot = config.roots[0] ?? process.cwd();
+        const context = await store.getProjectContext(projectRoot);
+
+        if (context) {
+          await store.setProjectContext({
+            ...context,
+            status: "complete"
+          });
+        }
+
+        // Stop all active implementers
+        const implementers = await store.listImplementers();
+        for (const impl of implementers) {
+          if (impl.status === "active") {
+            if (impl.pid) {
+              try {
+                process.kill(impl.pid, "SIGTERM");
+              } catch {
+                // Process may already be dead
+              }
+            }
+            await store.updateImplementer(impl.id, "stopped");
+          }
+        }
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: message }));
+      }
+      return;
+    }
+
+    // Handle task approve API
+    const approveMatch = parsed.pathname?.match(/^\/api\/task\/(.+)\/approve$/);
+    if (approveMatch && req.method === "POST") {
+      try {
+        const taskId = decodeURIComponent(approveMatch[1]);
+        await store.approveTask({ id: taskId });
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: message }));
+      }
+      return;
+    }
+
+    // Handle task reject API
+    const rejectMatch = parsed.pathname?.match(/^\/api\/task\/(.+)\/reject$/);
+    if (rejectMatch && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", async () => {
+        try {
+          const data = JSON.parse(body || "{}");
+          const taskId = decodeURIComponent(rejectMatch[1]);
+          const feedback = data.feedback || "Changes requested";
+
+          // Mark task as in_progress with feedback
+          await store.requestTaskChanges({ id: taskId, feedback });
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: true }));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: message }));
+        }
+      });
+      return;
+    }
+
+    // Handle stop specific implementer API
+    const stopImplMatch = parsed.pathname?.match(/^\/api\/implementer\/(.+)\/stop$/);
+    if (stopImplMatch && req.method === "POST") {
+      try {
+        const implId = decodeURIComponent(stopImplMatch[1]);
+        const implementers = await store.listImplementers();
+        const impl = implementers.find(i => i.id === implId);
+
+        if (!impl) {
+          res.writeHead(404, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: "Implementer not found" }));
+          return;
+        }
+
+        // Try to kill the process if we have a PID
+        if (impl.pid) {
+          try {
+            process.kill(impl.pid, "SIGTERM");
+          } catch {
+            // Process may already be dead
+          }
+        }
+
+        await store.updateImplementer(impl.id, "stopped");
+
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: true }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "Unknown error";
+        res.writeHead(500, { "Content-Type": "application/json" });
+        res.end(JSON.stringify({ success: false, error: message }));
+      }
       return;
     }
 

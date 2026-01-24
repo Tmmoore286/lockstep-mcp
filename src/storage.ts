@@ -197,6 +197,18 @@ export interface Store {
   listImplementers(projectRoot?: string): Promise<Implementer[]>;
   resetImplementers(projectRoot: string): Promise<number>;
 
+  // Session management
+  resetSession(projectRoot: string, options?: {
+    keepProjectContext?: boolean;
+    archiveTasks?: boolean;
+  }): Promise<{
+    tasksCleared: number;
+    locksCleared: number;
+    notesCleared: number;
+    implementersReset: number;
+    discussionsArchived: number;
+  }>;
+
   // Discussion methods
   createDiscussion(input: {
     topic: string;
@@ -644,6 +656,62 @@ export class JsonStore implements Store {
       await this.saveImplementers(implementers);
       await appendLog(this.logDir, "implementers_reset", { projectRoot, count });
       return count;
+    });
+  }
+
+  async resetSession(projectRoot: string, options?: {
+    keepProjectContext?: boolean;
+    archiveTasks?: boolean;
+  }): Promise<{
+    tasksCleared: number;
+    locksCleared: number;
+    notesCleared: number;
+    implementersReset: number;
+    discussionsArchived: number;
+  }> {
+    return this.withStateLock(async () => {
+      const state = await this.loadState();
+
+      // Count and clear tasks
+      const tasksCleared = state.tasks.length;
+      state.tasks = [];
+
+      // Count and clear locks
+      const locksCleared = state.locks.length;
+      state.locks = [];
+
+      // Count and clear notes
+      const notesCleared = state.notes.length;
+      state.notes = [];
+
+      await this.saveState(state);
+
+      // Reset implementers
+      const implementersReset = await this.resetImplementers(projectRoot);
+
+      // Clear project context unless keepProjectContext is true
+      if (!options?.keepProjectContext) {
+        const contexts = await this.loadContexts();
+        delete contexts[projectRoot];
+        await this.saveContexts(contexts);
+      }
+
+      await appendLog(this.logDir, "session_reset", {
+        projectRoot,
+        tasksCleared,
+        locksCleared,
+        notesCleared,
+        implementersReset,
+        discussionsArchived: 0
+      });
+
+      return {
+        tasksCleared,
+        locksCleared,
+        notesCleared,
+        implementersReset,
+        discussionsArchived: 0 // JSON store doesn't support discussions
+      };
     });
   }
 
@@ -1480,6 +1548,78 @@ export class SqliteStore implements Store {
     ).run(updatedAt, projectRoot);
     await appendLog(this.logDir, "implementers_reset", { projectRoot, count: result.changes });
     return result.changes;
+  }
+
+  async resetSession(projectRoot: string, options?: {
+    keepProjectContext?: boolean;
+    archiveTasks?: boolean;
+  }): Promise<{
+    tasksCleared: number;
+    locksCleared: number;
+    notesCleared: number;
+    implementersReset: number;
+    discussionsArchived: number;
+  }> {
+    const db = this.getDb();
+
+    // Start transaction for atomic reset
+    const resetTransaction = db.transaction(() => {
+      // Count and clear tasks
+      const taskCount = db.prepare("SELECT COUNT(*) as count FROM tasks").get() as { count: number };
+      const tasksCleared = taskCount.count;
+      db.prepare("DELETE FROM tasks").run();
+
+      // Count and clear active locks (keep resolved for history if needed)
+      const lockCount = db.prepare("SELECT COUNT(*) as count FROM locks WHERE status = 'active'").get() as { count: number };
+      const locksCleared = lockCount.count;
+      db.prepare("UPDATE locks SET status = 'resolved', updated_at = ? WHERE status = 'active'").run(nowIso());
+      // Also delete all locks if we want a clean slate
+      db.prepare("DELETE FROM locks").run();
+
+      // Count and clear notes
+      const noteCount = db.prepare("SELECT COUNT(*) as count FROM notes").get() as { count: number };
+      const notesCleared = noteCount.count;
+      db.prepare("DELETE FROM notes").run();
+
+      // Reset implementers
+      const updatedAt = nowIso();
+      const implResult = db.prepare(
+        "UPDATE implementers SET status = 'stopped', updated_at = ? WHERE project_root = ? AND status = 'active'"
+      ).run(updatedAt, projectRoot);
+      const implementersReset = implResult.changes;
+
+      // Archive open discussions
+      const discussionResult = db.prepare(
+        "UPDATE discussions SET status = 'archived', archived_at = ?, updated_at = ? WHERE project_root = ? AND status IN ('open', 'waiting')"
+      ).run(nowIso(), nowIso(), projectRoot);
+      const discussionsArchived = discussionResult.changes;
+
+      // Clear project context unless keepProjectContext is true
+      if (!options?.keepProjectContext) {
+        db.prepare("DELETE FROM project_contexts WHERE project_root = ?").run(projectRoot);
+      } else {
+        // Reset status to planning if keeping context
+        db.prepare("UPDATE project_contexts SET status = 'planning', updated_at = ? WHERE project_root = ?")
+          .run(nowIso(), projectRoot);
+      }
+
+      return {
+        tasksCleared,
+        locksCleared,
+        notesCleared,
+        implementersReset,
+        discussionsArchived
+      };
+    });
+
+    const result = resetTransaction();
+
+    await appendLog(this.logDir, "session_reset", {
+      projectRoot,
+      ...result
+    });
+
+    return result;
   }
 
   // Discussion methods

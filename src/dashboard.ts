@@ -617,6 +617,104 @@ const DASHBOARD_HTML = `<!doctype html>
         color: var(--green);
       }
 
+      /* Reset Button */
+      .reset-btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .reset-btn:hover {
+        border-color: var(--red);
+        color: var(--red);
+        background: var(--red-glow);
+      }
+
+      .reset-btn:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+
+      /* Confirmation Modal */
+      .modal-overlay {
+        position: fixed;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        background: rgba(0, 0, 0, 0.7);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        z-index: 1000;
+      }
+
+      .modal {
+        background: var(--bg-elevated);
+        border: 1px solid var(--border);
+        border-radius: 12px;
+        padding: 24px;
+        max-width: 400px;
+        width: 90%;
+      }
+
+      .modal h3 {
+        font-size: 16px;
+        font-weight: 600;
+        margin-bottom: 12px;
+        color: var(--text-primary);
+      }
+
+      .modal p {
+        font-size: 13px;
+        color: var(--text-secondary);
+        margin-bottom: 20px;
+        line-height: 1.5;
+      }
+
+      .modal-actions {
+        display: flex;
+        gap: 12px;
+        justify-content: flex-end;
+      }
+
+      .modal-btn {
+        padding: 8px 16px;
+        border-radius: 6px;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: all 0.15s ease;
+      }
+
+      .modal-btn.cancel {
+        background: var(--bg-card);
+        border: 1px solid var(--border);
+        color: var(--text-secondary);
+      }
+
+      .modal-btn.cancel:hover {
+        border-color: var(--border-light);
+        color: var(--text-primary);
+      }
+
+      .modal-btn.danger {
+        background: var(--red-glow);
+        border: 1px solid var(--red);
+        color: var(--red);
+      }
+
+      .modal-btn.danger:hover {
+        background: var(--red);
+        color: white;
+      }
+
       /* Toggle Switch */
       .toggle-container {
         display: flex;
@@ -673,9 +771,12 @@ const DASHBOARD_HTML = `<!doctype html>
   <body>
     <header>
       <h1>Lockstep MCP</h1>
-      <div class="status-badge" id="status-badge">
-        <div class="status-dot" id="status-dot"></div>
-        <span id="status">Connecting</span>
+      <div style="display: flex; align-items: center; gap: 16px;">
+        <button class="reset-btn" id="reset-btn" title="Reset session for fresh start">Reset Session</button>
+        <div class="status-badge" id="status-badge">
+          <div class="status-dot" id="status-dot"></div>
+          <span id="status">Connecting</span>
+        </div>
       </div>
     </header>
 
@@ -809,6 +910,75 @@ const DASHBOARD_HTML = `<!doctype html>
           renderTasks(allTasks);
         });
       });
+
+      // Reset session button
+      const resetBtn = document.getElementById("reset-btn");
+      resetBtn.addEventListener("click", () => {
+        showResetModal();
+      });
+
+      function showResetModal() {
+        const overlay = document.createElement("div");
+        overlay.className = "modal-overlay";
+        overlay.innerHTML = \`
+          <div class="modal">
+            <h3>Reset Session?</h3>
+            <p>This will clear all tasks, locks, notes, and archive discussions. Use this when starting a new project or when data from previous sessions is cluttering the dashboard.</p>
+            <label style="display: flex; align-items: center; gap: 8px; margin-bottom: 16px; font-size: 12px; color: var(--text-secondary);">
+              <input type="checkbox" id="keep-context-checkbox">
+              Keep project description (only reset tasks and data)
+            </label>
+            <div class="modal-actions">
+              <button class="modal-btn cancel" id="cancel-reset">Cancel</button>
+              <button class="modal-btn danger" id="confirm-reset">Reset Session</button>
+            </div>
+          </div>
+        \`;
+        document.body.appendChild(overlay);
+
+        document.getElementById("cancel-reset").addEventListener("click", () => {
+          overlay.remove();
+        });
+
+        overlay.addEventListener("click", (e) => {
+          if (e.target === overlay) overlay.remove();
+        });
+
+        document.getElementById("confirm-reset").addEventListener("click", async () => {
+          const keepContext = document.getElementById("keep-context-checkbox").checked;
+          overlay.remove();
+          await resetSession(keepContext);
+        });
+      }
+
+      async function resetSession(keepProjectContext) {
+        resetBtn.disabled = true;
+        resetBtn.textContent = "Resetting...";
+        try {
+          const response = await fetch("/api/reset", {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ keepProjectContext })
+          });
+          const result = await response.json();
+          if (result.success) {
+            // Clear local state
+            activityLog = [];
+            prevTaskStates = {};
+            prevLockStates = {};
+            // Refresh the dashboard
+            await fetchState();
+            alert("Session reset complete!\\n\\n" + result.message);
+          } else {
+            alert("Reset failed: " + (result.error || "Unknown error"));
+          }
+        } catch (err) {
+          alert("Reset failed: " + err.message);
+        } finally {
+          resetBtn.disabled = false;
+          resetBtn.textContent = "Reset Session";
+        }
+      }
 
       function escapeHtml(text) {
         const map = {
@@ -1280,6 +1450,33 @@ export async function startDashboard(options: DashboardOptions = {}) {
       const result = await focusTerminalWindow(impl.name);
       res.writeHead(result.success ? 200 : 400, { "Content-Type": "application/json" });
       res.end(JSON.stringify(result));
+      return;
+    }
+
+    // Handle session reset API
+    if (parsed.pathname === "/api/reset" && req.method === "POST") {
+      let body = "";
+      req.on("data", (chunk) => { body += chunk; });
+      req.on("end", async () => {
+        try {
+          const data = JSON.parse(body || "{}");
+          const keepProjectContext = data.keepProjectContext ?? false;
+          const projectRoot = config.roots[0] ?? process.cwd();
+
+          const result = await store.resetSession(projectRoot, { keepProjectContext });
+
+          res.writeHead(200, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({
+            success: true,
+            ...result,
+            message: `Cleared ${result.tasksCleared} tasks, ${result.locksCleared} locks, ${result.notesCleared} notes. Reset ${result.implementersReset} implementers, archived ${result.discussionsArchived} discussions.`
+          }));
+        } catch (error) {
+          const message = error instanceof Error ? error.message : "Unknown error";
+          res.writeHead(500, { "Content-Type": "application/json" });
+          res.end(JSON.stringify({ success: false, error: message }));
+        }
+      });
       return;
     }
 

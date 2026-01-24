@@ -593,6 +593,20 @@ const tools = [
     },
   },
   {
+    name: "session_reset",
+    description: "PLANNER ONLY: Reset the coordination session for a fresh start. Clears all tasks, locks, notes, and archives discussions. Use this when starting a new project or when data from previous sessions is cluttering the dashboard.",
+    inputSchema: {
+      type: "object",
+      properties: {
+        projectRoot: { type: "string", description: "Project root (defaults to first configured root)" },
+        keepProjectContext: { type: "boolean", description: "If true, keeps the project description/goals but resets status to 'planning'. Default: false (clears everything)" },
+        confirm: { type: "boolean", description: "Must be true to confirm the reset. This prevents accidental resets." },
+      },
+      required: ["confirm"],
+      additionalProperties: false,
+    },
+  },
+  {
     name: "dashboard_open",
     description: "Open the lockstep dashboard in a browser. Call this to monitor progress visually.",
     inputSchema: {
@@ -1615,6 +1629,31 @@ IMPORTANT: Keep working until all tasks are done or project is stopped. Do not w
           success: true,
           resetCount: count,
           message: `Reset ${count} implementer(s) to stopped status. You can now launch fresh implementers.`
+        });
+      }
+      case "session_reset": {
+        const confirm = getBoolean(args.confirm);
+        if (!confirm) {
+          return jsonResponse({
+            success: false,
+            error: "Session reset requires confirm: true to proceed. This will clear all tasks, locks, notes, and archive discussions."
+          });
+        }
+
+        const projectRoot = getString(args.projectRoot) ?? config.roots[0] ?? process.cwd();
+        const keepProjectContext = getBoolean(args.keepProjectContext) ?? false;
+
+        const result = await store.resetSession(projectRoot, { keepProjectContext });
+
+        return jsonResponse({
+          success: true,
+          ...result,
+          message: `Session reset complete. Cleared ${result.tasksCleared} tasks, ${result.locksCleared} locks, ${result.notesCleared} notes. Reset ${result.implementersReset} implementers, archived ${result.discussionsArchived} discussions.${keepProjectContext ? " Project context preserved (status reset to planning)." : " Project context cleared."}`,
+          nextSteps: [
+            "1. Call coordination_init({ role: 'planner' }) to start fresh",
+            "2. Set up project context with project_context_set",
+            "3. Create tasks and launch implementers"
+          ]
         });
       }
       case "dashboard_open": {

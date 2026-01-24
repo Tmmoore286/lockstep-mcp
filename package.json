@@ -4,6 +4,9 @@
   "description": "Local MCP coordination server for multi-agent workflows",
   "type": "module",
   "main": "dist/cli.js",
+  "engines": {
+    "node": ">=18.0.0"
+  },
   "bin": {
     "lockstep-mcp": "dist/cli.js"
   },

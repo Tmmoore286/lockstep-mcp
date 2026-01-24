@@ -4,6 +4,13 @@ import path from "node:path";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 
+// Read version from package.json
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const packageJsonPath = path.resolve(__dirname, "../package.json");
+const packageJson = JSON.parse(fs.readFileSync(packageJsonPath, "utf8"));
+const VERSION = packageJson.version;
+
 function parseArgs(argv: string[]) {
   const args: Record<string, string | boolean> = {};
   const positional: string[] = [];
@@ -43,7 +50,7 @@ For more info: https://github.com/anthropics/lockstep-mcp
 ${LOCKSTEP_MARKER_END}`;
 
 function printHelp() {
-  const text = `lockstep-mcp - Multi-agent coordination for Claude and Codex
+  const text = `lockstep-mcp v${VERSION} - Multi-agent coordination for Claude and Codex
 
 Usage:
   lockstep-mcp install [--claude] [--codex] [--all] [--config <path>] [--mode open|strict] [--roots <paths>] [--storage sqlite|json]
@@ -57,6 +64,7 @@ Usage:
   lockstep-mcp tmux [--repo <path>] [--session <name>] [--layout windows|panes]
   lockstep-mcp macos [--repo <path>]
   lockstep-mcp prompts [--role planner|implementer]
+  lockstep-mcp version
 
 Commands:
   install     Add lockstep-mcp to Claude and/or Codex MCP configs
@@ -69,12 +77,14 @@ Commands:
   dashboard   Start the web dashboard
   tmux        Launch Claude + Codex in tmux
   macos       Launch Claude + Codex in macOS Terminal
+  version     Show version number
 
 Examples:
   lockstep-mcp install --all                    # Install for both Claude and Codex
   lockstep-mcp install --codex --mode strict    # Install for Codex only
   lockstep-mcp init                             # Add instructions to current project
   lockstep-mcp status                           # Check installation status
+  lockstep-mcp --version                        # Show version
 `;
   process.stdout.write(text);
 }
@@ -172,6 +182,11 @@ async function main() {
 
   if (command === "help" || command === "--help" || command === "-h") {
     printHelp();
+    return;
+  }
+
+  if (command === "version" || command === "--version" || command === "-v" || args["--version"]) {
+    process.stdout.write(`lockstep-mcp v${VERSION}\n`);
     return;
   }
 

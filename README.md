@@ -1,5 +1,7 @@
 # Lockstep MCP
 
+[![CI](https://github.com/Tmmoore286/lockstep-mcp/actions/workflows/ci.yml/badge.svg)](https://github.com/Tmmoore286/lockstep-mcp/actions/workflows/ci.yml)
+
 Lockstep MCP is a multi-agent coordination server that enables Claude, Codex, and other AI agents to work together on the same project without conflicts. It provides shared state (tasks, locks, notes) so agents can coordinate their work.
 
 ## Quick Start
@@ -421,6 +423,64 @@ Multiple ways to turn off lockstep:
 
 ---
 
+## Security Model
+
+Lockstep MCP is designed as a **local development tool** running on your machine. The threat model is "prevent agents from escaping their sandbox," not "defend against external attackers."
+
+### File Access Control
+
+| Mode | Behavior |
+|------|----------|
+| `open` (default) | Agents can read/write any file the process can access |
+| `strict` | File operations restricted to specified `--roots` directories |
+
+```bash
+# Restrict to specific directories
+lockstep-mcp install --all --mode strict --roots /path/to/project,/tmp
+```
+
+In strict mode, any file operation outside the allowed roots will fail.
+
+### Command Execution Control
+
+The `command_run` tool executes shell commands. Control it with:
+
+| Mode | Behavior |
+|------|----------|
+| `open` (default) | Any command can be executed |
+| `allowlist` | Only commands in `--command-allow` list are permitted |
+
+```bash
+# Only allow specific commands
+lockstep-mcp install --all --command-mode allowlist --command-allow "npm,node,git,make"
+```
+
+The allowlist checks the **first word** of the command (e.g., `npm install` checks `npm`).
+
+### Recommended Security Settings
+
+For production-like security:
+```bash
+lockstep-mcp install --all \
+  --mode strict \
+  --roots /path/to/project \
+  --command-mode allowlist \
+  --command-allow "npm,node,git,make,pytest"
+```
+
+For typical development (default):
+```bash
+lockstep-mcp install --all  # Uses open mode, all commands allowed
+```
+
+### What Lockstep Does NOT Protect Against
+
+- **Malicious prompts**: If you tell an agent to delete files, it will try
+- **Network exfiltration**: Agents can make network requests if the underlying tools allow
+- **Privilege escalation**: Lockstep runs with your user permissions
+
+---
+
 ## Configuration Options
 
 When installing, you can customize the server:
@@ -435,6 +495,8 @@ lockstep-mcp install --all --mode strict --roots /path/to/project,/tmp
 | `--roots /path1,/path2` | Allowed directories (for strict mode) | Current directory |
 | `--storage sqlite\|json` | Storage backend | `sqlite` |
 | `--db-path /path/to/db` | Database file location | `~/.lockstep-mcp/data/coordinator.db` |
+| `--command-mode open\|allowlist` | Command execution policy | `open` |
+| `--command-allow cmd1,cmd2` | Allowed commands (for allowlist mode) | (none) |
 
 ---
 

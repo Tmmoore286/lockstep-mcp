@@ -1,3 +1,4 @@
+#!/usr/bin/env node
 import { installMcpEntry, uninstallMcpEntry, getInstallStatus, type InstallTarget } from "./install.js";
 import { getAutopilotPrompts, getPlannerPrompt, getImplementerPrompt } from "./prompts.js";
 import path from "node:path";

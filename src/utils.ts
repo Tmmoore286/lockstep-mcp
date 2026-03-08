@@ -1,9 +1,10 @@
 import fs from "node:fs/promises";
+import os from "node:os";
 import path from "node:path";
 
 export function expandHome(input: string): string {
   if (!input.startsWith("~")) return input;
-  const home = process.env.HOME;
+  const home = process.env.HOME || process.env.USERPROFILE || os.homedir();
   if (!home) return input;
   return path.join(home, input.slice(1));
 }
